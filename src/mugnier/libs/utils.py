@@ -1,11 +1,13 @@
 # coding: utf-8
 """Metas."""
 from __future__ import annotations
+from re import S
+from turtle import forward
 from weakref import WeakValueDictionary
 from builtins import map, zip
 from itertools import tee
 from operator import itemgetter
-from typing import Any, Callable, Generator, Iterable, Literal, Optional, TypeVar
+from typing import Any, Callable, Generator, Iterable, Literal, Optional, TypeVar, Tuple
 
 
 class Cached(type):
@@ -52,6 +54,7 @@ class Cached(type):
 A = TypeVar('A')
 B = TypeVar('B')
 
+
 def lazyproperty(func: Callable[..., A]) -> Callable[..., A]:
     name = '__lazy_' + func.__name__
 
@@ -70,9 +73,32 @@ def lazyproperty(func: Callable[..., A]) -> Callable[..., A]:
 T = TypeVar('T')
 
 
-def iter_visitor(start: T,
-                 r: Callable[[T], list[T]],
-                 method: Literal['DFS' , 'BFS'] = 'DFS') -> Generator[T, None, None]:
+def iter_round_visitor(
+        start: T,
+        r: Callable[[T], list[T]]) -> Generator[Tuple[T, bool], None, None]:
+    """Iterative round-trip visitor. Only support 'DFS' (depth first) method.
+
+    Args:
+        start: Initial object
+        r: Relation function.
+    """
+    stack, visited = [start], set()
+    while stack:
+        vertex = stack.pop()
+        if vertex not in visited:
+            visited.add(vertex)
+            nexts = [n for n in r(vertex) if n not in visited]
+            stack.extend(
+                nexts[i // 2] if i % 2 else vertex
+                for i in range(2 * len(nexts))
+            )
+        yield vertex
+
+
+def iter_visitor(
+        start: T,
+        r: Callable[[T], list[T]],
+        method: Literal['DFS', 'BFS'] = 'DFS') -> Generator[Tuple[T, int], None, None]:
     """Iterative visitor.
 
     Args:
@@ -83,72 +109,66 @@ def iter_visitor(start: T,
     stack, visited = [start], set()
     while stack:
         if method == 'DFS':
-            vertex = stack.pop()
-        elif method == 'BFS':
-            vertex, stack = stack[0], stack[1:]
+            stack, vertex = stack[:-1], stack[-1]
         else:
-            raise NotImplementedError(
-                "Only support 'DFS' (depth first) and 'BFS' (breadth first) methods."
-            )
+            assert method == 'BFS'
+            vertex, stack = stack[0], stack[1:]
         if vertex not in visited:
             visited.add(vertex)
-            try:
-                n_ = r(vertex)
-                stack.extend(n_ - visited)
-            except:
-                pass
+            stack.extend(n for n in r(vertex) if n not in visited)
             yield vertex
 
 
-def huffman_tree(sources: list(T),
-                 importance: Optional[list[int]] = None,
-                 obj_new: Optional[Callable[[], T]] = None,
-                 n_branch: int = 2) -> T:
+def depth_dict(start: T, r: Callable[[T], list[T]]) -> dict[T, int]:
+    """Iterative visitor.
 
-    def obj(x):
-        return x[0]
+    Args:
+        start: Initial object
+        r: Relation function.
+    """
+    ans = {start: 0}
+    stack, visited = [start], set()
+    while stack:
+        vertex = stack.pop()
+        if vertex not in visited:
+            visited.add(vertex)
+            n_ = {n: ans[vertex] + 1 for n in r(vertex) if n not in visited}
+            stack.extend(n_.keys())
+            ans.update(n_)
+    return ans
 
-    def key(x):
-        return x[1]
 
-    if importance is None:
-        importance = [1] * len(sources)
-    if obj_new is None:
+def huffman_tree(sources: list[T],
+                 new_obj: Callable[[], T],
+                 importances: Optional[list[int]] = None,
+                 n_ary: int = 2) -> Tuple[dict[T, list[T]], T]:
+    """Generate a Tree for the soureces as leaves using Huffman coding method.
+    """
+    if importances is None:
+        importances = [1] * len(sources)
 
-        class counter:
-            n = 0
+    def fst(x): return x[0]
+    def snd(x): return x[1]
 
-            def __new__(cls) -> int:
-                cls.n += 1
-                return cls.n
-
-        obj_new = counter
-
-    sequence = list(zip(sources, importance))
-    graph = {}
+    sequence = list(zip(sources, importances))
+    graph = dict()
     while len(sequence) > 1:
-        sequence.sort(key=key)
+        sequence.sort(key=snd)
         try:
-            branch, sequence = sequence[:n_branch], sequence[n_branch:]
-        except:
+            branch, sequence = sequence[:n_ary], sequence[n_ary:]
+        except IndexError:
             branch, sequence = sequence, []
-        p = sum(map(key, branch))
-        new = obj_new()
-        graph[new] = list(map(obj, branch))
+        p = sum(map(snd, branch))
+        new = new_obj()
+        graph[new] = list(map(fst, branch))
         sequence.insert(0, (new, p))
-    return graph, obj(sequence[0])
+    return graph, fst(sequence[0])
 
 
 def unzip(iterable: Iterable) -> Iterable[Iterable]:
     """The same as zip(*iter) but returns iterators, instead
     of expand the iterator. Mostly used for large sequence.
     Reference: https://gist.github.com/andrix/1063340
-
-    Args:
-        iterable
-
-    Returns
-        unzipped iterators
     """
     _tmp, iterable = tee(iterable, 2)
     iters = tee(iterable, len(next(_tmp)))

@@ -2,6 +2,9 @@
 r"""Backend for accelerated array-operations.
 """
 from functools import partial
+from turtle import shape
+from typing import Optional
+from numpy import moveaxis
 
 import torch
 
@@ -12,5 +15,14 @@ else:
 
 dtype = torch.complex64
 Array = torch.Tensor
-asarray = partial(torch.tensor, dtype=dtype, device=device)
-zeros = partial(torch.zeros, dtype=dtype, device=device)
+tensordot = torch.tensordot
+reshape = torch.reshape
+moveaxis = torch.movedim
+
+
+def asarray(array):
+    return torch.tensor(array, dtype=dtype, device=device).detach()
+
+
+def zeros(shape):
+    return torch.zeros(shape, dtype=dtype, device=device).detach()

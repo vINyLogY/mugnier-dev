@@ -5,15 +5,19 @@ r"""Data structure for topology of tensors in a network
 
 from __future__ import annotations
 from collections import OrderedDict
+from functools import partial
+from itertools import pairwise
 
+from typing import Iterable, Literal, Optional
 
+from matplotlib.pyplot import axes
 
-from typing import Iterable, Optional
-
-from mugnier.libs.utils import T, Cached, iter_visitor, lazyproperty
+from mugnier.libs.utils import T, Cached, depth_dict, iter_visitor, iter_round_visitor, lazyproperty
 from mugnier.libs.backend import asarray, Array, zeros
 
+
 class Node(metaclass=Cached):
+
     def __init__(self, name: Optional[str] = None) -> None:
         """Node monad."""
         self.name = str(hex(id(self))) if name is None else str(name)
@@ -22,7 +26,9 @@ class Node(metaclass=Cached):
     def __repr__(self) -> str:
         return f'({self.name})'
 
+
 class Edge(metaclass=Cached):
+
     def __init__(self, name: Optional[str] = None) -> None:
         r"""
         Edge monad.
@@ -32,8 +38,6 @@ class Edge(metaclass=Cached):
 
     def __repr__(self) -> str:
         return f'<{self.name}>'
-
-
 
 
 class Frame(object):
@@ -62,7 +66,8 @@ class Frame(object):
         elif isinstance(obj, Edge):
             dct = self._edge2nodes
         else:
-            raise TypeError(f'Only define order for Node or Edge, not {type(obj)}.')
+            raise TypeError(
+                f'Only define order for Node or Edge, not {type(obj)}.')
 
         assert obj in dct
         return len(dct[obj])
@@ -112,11 +117,10 @@ class Frame(object):
     def near_node(self, node: Node) -> list[Edge]:
         return self._node2edges[node]
 
-    def near_edge(self, edge: Edge) ->  list[Node]:
+    def near_edge(self, edge: Edge) -> list[Node]:
         return self._edge2nodes[edge]
 
-    def next_nodes(self,
-                   node: Node) -> list[Node]:
+    def next_nodes(self, node: Node) -> list[Node]:
         assert node in self.nodes
 
         ans = list()
@@ -125,25 +129,61 @@ class Frame(object):
 
         return ans
 
-    def next_edges(self,
-                   edge: Edge) -> list[Edge]:
+    def next_edges(self, edge: Edge) -> list[Edge]:
         assert edge in self.edges
 
         ans = list()
         for n in self._edge2nodes[edge]:
-                ans += [e for e in self._node2edges[n] if e is not edge]
+            ans += [e for e in self._node2edges[n] if e is not edge]
 
         return ans
 
     @property
     def node_graph(self) -> dict[Node, list[Node]]:
+        """
+        Undirectional node graph in dictionary.
+        """
         return {n: self.next_nodes(n) for n in self.nodes}
 
+    def find_link(self, n1: Node, n2: Node):
+        es1 = self._node2edges[n1]
+        es2 = self._node2edges[n2]
+        cap = set(es1) & set(es2)
 
+        if len(cap) == 1:
+            e = cap.pop()
+            i = self._node2edges[n1].index(e)
+            j = self._node2edges[n2].index(e)
+            return (n1, i, n2, j)
+
+        else:
+            raise NotImplementedError(
+                f'Not support between {n1} and {n2} non-direct case and multi-graph.'
+            )
+
+    def node_visitor(self, start: Node, method: Literal['DFS', 'BFS'] = 'DFS'):
+        return list(iter_visitor(start, self.next_nodes, method=method))
+
+    def link_visitor(self, start: Node):
+        nodes = [n for n in iter_round_visitor(start, self.next_nodes)]
+        return [self.find_link(n1, n2) for n1, n2 in pairwise(nodes)]
+
+    def visitor(self, start: Node):
+
+        def _r(obj: Node | Edge) -> list[Edge | Node]:
+            if isinstance(obj, Node):
+                dct = self._node2edges
+            else:
+                assert isinstance(obj, Edge)
+                dct = self._edge2nodes
+            return dct[obj]
+
+        return list(iter_round_visitor(start, _r))
 
 
 class Network(object):
-
+    """Network is a Frame with valuation for each node.
+    """
     def __init__(self, frame: Frame) -> None:
         """
         Args:
@@ -153,15 +193,15 @@ class Network(object):
 
         self.frame = frame
         self.dofs = frame.end_points
-        self._dims = dict  # type: dict[Edge, int]
+        self._dims = dict()  # type: dict[Edge, int]
         self._valuation = dict()  # type: dict[Node, Array]
         return
 
     def claim_array(self, node: Node, array: Array) -> None:
-        assert node in self.frame
+        assert node in self.frame.nodes and node not in self.frame.end_points
         assert self.frame.order(node) == array.ndim
 
-        for i, e in enumerate(self.frame.near(node)):
+        for i, e in enumerate(self.frame.near_node(node)):
             if e in self._dims:
                 assert self._dims[e] == array.shape[i]
             else:
@@ -173,7 +213,7 @@ class Network(object):
 
         node_shape = [None] * self.frame.order(node)
 
-        for i, e in enumerate(self.frame.near(node)):
+        for i, e in enumerate(self.frame.near_node(node)):
             if e in self._dims:
                 node_shape[i] = self._dims[e]
         return node_shape
@@ -183,7 +223,7 @@ class Network(object):
 
     def __setitem__(self, node: Node, array: Array) -> None:
         self.claim_array(node, array)
-        self._valuation[node] = asarray(array)
+        self._valuation[node] = array
         return
 
     def __delitem__(self, node: Node):
@@ -199,77 +239,58 @@ class Network(object):
             dims = dict()
 
         for n in self.frame.nodes:
-            if n not in self._valuation:
+            if n not in self.dofs and n not in self._valuation:
                 shape = [
                     self._dims.get(e, dims.get(e, 1))
-                    for e in self.frame.near(n)
+                    for e in self.frame.near_node(n)
                 ]
                 self[n] = zeros(shape)
 
         return
 
 
-# class State(Network):
-#     """
-#     State with Tree restricted shape and valuation
-#     """
+class State(Network):
+    """
+    State is a Network with Tree-shape and root.
+    """
 
-#     def __init__(self, frame: Frame, root: Node) -> None:
-#         super().__init__(frame)
+    def __init__(self, frame: Frame, root: Node) -> None:
+        super().__init__(frame)
 
-#         self.root = root
-#         return
+        self._root = root
+        self._depthes = None    # type: Optional[dict[Node, int]]
+        self._axes = None  # type: Optional[dict[Node, Optional[int]]]
+        return
 
-#     @lazyproperty
-#     def depth(self) -> dict[Node, int]:
-#         d = 0
-#         dct = dict()
-#         visited = set()
-#         stack = set([self.root])
-#         neighbor = partial(self.frame.next_nodes)
-#         while len(stack) > 0:
-#             dct.update({n: d for n in stack})
-#             visited |= stack
-#             stack = set().union(*(set(neighbor(s)) for s in stack)) - visited
-#             d += 1
+    @property
+    def root(self) -> Node:
+        return self._root
 
-#         return dct
+    @root.setter
+    def root(self, value: Node) -> None:
+        assert value in self.frame.nodes
+        self._root = value
+        self._depthes = None
+        self._axes = None
+        return
 
-#     @lazyproperty
-#     def axes(self) -> dict[Node, OptEdge]:
-#         root = self.root
-#         near = self.frame.near
+    @property
+    def depthes(self) -> dict[Node, int]:
+        if self._depthes is None:
+            ans = depth_dict(self.root, self.frame.next_nodes)
+            self._depthes = ans
+        else:
+            ans = self._depthes
+        return ans
 
-#         dct = {root: None}
-#         visited = set([root])
-#         stack = set([root])
-
-#         while len(stack) > 0:
-#             n = stack.pop()
-
-#             new_items = {
-#                 child: e
-#                 for e in near(n) for child in near(e) if child not in visited
-#             }
-
-#             dct.update(new_items)
-#             new_nodes = set(new_items.keys())
-#             visited |= new_nodes
-#             stack |= new_nodes
-
-#         return dct
-
-#     def annotated_array(self,
-#                         edge: Edge,
-#                         conj: bool = False) -> Tuple[ArrayLike, int]:
-
-#         node = max(self.frame.near(edge), self.depth.get)
-
-#         i = self.frame.near(node).index(edge)
-#         array = self._valuation[node]
-#         if conj:
-#             array = np.conj(array)
-#         return array, i
-
-
-
+    @property
+    def axes(self) -> dict[Node, Optional[int]]:
+        if self._axes is None:
+            ans = {self.root: None}
+            for m, i, n, j in self.frame.link_visitor(self.root):
+                if m in ans and n not in ans:
+                    ans[n] = j
+            self._axes = ans
+        else:
+            ans = self._axes
+        return ans
