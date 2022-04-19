@@ -10,47 +10,6 @@ from operator import itemgetter
 from typing import Any, Callable, Generator, Iterable, Literal, Optional, TypeVar, Tuple
 
 
-class Cached(type):
-    """Meta-class to create a class that auto generate cached class.
-
-    Args
-    ----
-    identifier : str
-        Parameter used in __init__ method in class to identify a object.
-    default : a
-        The value of the parameter that will not be used as an identifier in
-        the cache. 
-    """
-
-    def __new__(cls, name: str, bases: tuple, dct: dict, **kwarg) -> Cached:
-        return super().__new__(cls, name, bases, dct)
-
-    def __init__(self,
-                 name: str,
-                 bases: tuple,
-                 dct: dict,
-                 identifier: str = 'name',
-                 default: Any = None) -> None:
-        self.__identifier = identifier
-        self.__default = default
-        self.__cache = WeakValueDictionary()
-        super().__init__(name, bases, dct)
-        return
-
-    def __call__(self, *args, **kwargs) -> Any:
-        identifier = self.__identifier
-        default = self.__default
-        if identifier in kwargs and kwargs[identifier] != default:
-            if str(kwargs[identifier]) in self.__cache:
-                obj = self.__cache[str(kwargs[identifier])]
-            else:
-                obj = super().__call__(*args, **kwargs)
-                self.__cache[str(kwargs[identifier])] = obj
-        else:
-            obj = super().__call__(*args, **kwargs)
-        return obj
-
-
 A = TypeVar('A')
 B = TypeVar('B')
 
