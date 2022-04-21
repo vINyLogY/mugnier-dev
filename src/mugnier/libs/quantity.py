@@ -31,21 +31,22 @@ synonyms = {
     'K': ['kelvin', 'Kelvin'],
     'eV': ['ev'],
     'meV': ['mev'],
-    '/K': ['K-1',r'K^(-1)', r'K^{-1}'],
+    '/K': ['K-1', r'K^(-1)', r'K^{-1}'],
     '/cm': ['cm-1', r'cm^(-1)', r'cm^{-1}']
 }
 
+
 class Quantity(object):
-    def __init__(self, value: float, unit: Optional[str] =None):
+    def __init__(self, value: float, unit: Optional[str] = None) -> None:
         """
         Parameters:
         """
-        self.value= float(value)
+        self.value = float(value)
         self.unit = self.standardize(unit)
         return
 
     @staticmethod
-    def standardize(unit):
+    def standardize(unit: Optional[str]) -> Optional[str]:
         if unit is not None and unit not in atomic_unit_in:
             found = False
             for key, l in synonyms.items():
@@ -59,10 +60,10 @@ class Quantity(object):
         return unit
 
     @property
-    def au(self):
+    def au(self) -> float:
         return self.value / atomic_unit_in[self.unit]
 
-    def convert_to(self, unit=None):
+    def convert_to(self, unit: Optional[str] = None) -> Quantity:
         unit = self.standardize(unit)
         self.value = self.au * atomic_unit_in[unit]
         self.unit = unit
@@ -72,27 +73,27 @@ class Quantity(object):
     # + - only allowed between Quantities
     # * / only allowed between Quantities float
 
-    def __neg__(self):
+    def __neg__(self) -> Quantity:
         cls = type(self)
         return cls(-self.value, self.unit)
 
-    def __add__(self, other: Quantity):
+    def __add__(self, other: Quantity) -> Quantity:
         cls = type(self)
         return cls(self.au + other.au)
 
-    def __sub__(self, other: Quantity):
+    def __sub__(self, other: Quantity) -> Quantity:
         cls = type(self)
         return cls(self.au - other.au)
 
-    def __mul__(self, other: float):
+    def __mul__(self, other: float) -> Quantity:
         cls = type(self)
         return cls(self.au * other)
 
-    def __truediv__(self, other: float):
+    def __truediv__(self, other: float) -> Quantity:
         cls = type(self)
         return cls(self.au / other)
 
-    def __eq__(self, other: Quantity | Literal[0]):
+    def __eq__(self, other: Quantity | Literal[0]) -> Quantity:
         if hasattr(other, "au"):
             return self.au == other.au
         elif other == 0:
@@ -100,7 +101,7 @@ class Quantity(object):
         else:
             raise TypeError(f"Quantity can only compare with Quantity or 0, not {type(other)}.")
 
-    def __gt__(self, other: Quantity | Literal[0]):
+    def __gt__(self, other: Quantity | Literal[0]) -> Quantity:
         if hasattr(other, "au"):
             return self.au > other.au
         elif other == 0:
@@ -108,10 +109,9 @@ class Quantity(object):
         else:
             raise TypeError(f"Quantity can only compare with Quantity or 0, not {type(other)}.")
 
-    def __str__(self):
+    def __str__(self) -> str:
         unit = "a.u." if self.unit is None else self.unit
         return f"{self.value:.8f}_{unit}"
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<{str(self)}>"
-

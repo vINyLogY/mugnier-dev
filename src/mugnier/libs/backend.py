@@ -1,43 +1,47 @@
 # coding: utf-8
 r"""Backend for accelerated array-operations.
 """
-from functools import partial
-from turtle import shape
-from typing import Optional
-from numpy.typing import ArrayLike
-from sympy import arg
+
+from numpy.typing import ArrayLike, NDArray
+from numpy import array, stack, moveaxis, reshape
 
 import torch
+import numpy as np
 
 MAX_EINSUM_AXES = 52  # restrition from torch.einsum as of PyTorch 1.10
 
 if torch.cuda.is_available():
-    device = "cuda" 
+    device = "cuda"
 else:
     device = 'cpu'
 
-dtype = torch.complex64
-Array = torch.Tensor
-tensordot = torch.tensordot
-reshape = torch.reshape
-moveaxis = torch.movedim
+dtype = np.complex64
+dtype_gpu = torch.complex64
+Array = NDArray[dtype]
+ArrayGPU = torch.Tensor
 
-
-def as_array(array: ArrayLike) -> Array:
-    return torch.tensor(array, dtype=dtype, device=device).detach()
+# CPU arrays
 
 
 def zeros(shape: list[int]) -> Array:
-    return torch.zeros(shape, dtype=dtype, device=device).detach()
+    return np.zeros(shape, dtype=dtype)
 
 
-def eye(m: int, n: int) -> Array:
-    return torch.eye(m, n, dtype=dtype, device=device).detach()
+def ones(shape: list[int]) -> Array:
+    return np.ones(shape, dtype=dtype)
 
 
-def stack(tensors: list[Array]) -> Array:
-    return torch.stack(tensors).detach()
+def eye(m: int, n: int, k: int = 0) -> Array:
+    return np.eye(m, n, k, dtype=dtype)
 
 
-def einsum(*args) -> Array:
+reshape_gpu = torch.reshape
+moveaxis_gpu = torch.movedim
+
+
+def to_gpu(array: ArrayLike) -> Array:
+    return torch.tensor(array, dtype=dtype_gpu, device=device).detach()
+
+
+def einsum_gpu(*args) -> Array:
     return torch.einsum(*args).detach()

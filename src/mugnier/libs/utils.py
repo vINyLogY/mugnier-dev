@@ -1,24 +1,20 @@
 # coding: utf-8
 """Metas."""
 from __future__ import annotations
-from re import S
-from turtle import forward
-from weakref import WeakValueDictionary
 from builtins import map, zip
 from itertools import tee
 from operator import itemgetter
-from typing import Any, Callable, Generator, Iterable, Literal, Optional, TypeVar, Tuple
+from typing import Callable, Generator, Iterable, Literal, Optional, TypeVar, Tuple
 
 
-A = TypeVar('A')
-B = TypeVar('B')
+T = TypeVar('T')
 
 
-def lazyproperty(func: Callable[..., A]) -> Callable[..., A]:
+def lazyproperty(func: Callable[..., T]) -> Callable[..., T]:
     name = '__lazy_' + func.__name__
 
     @property
-    def lazy(self) -> A:
+    def lazy(self) -> T:
         if hasattr(self, name):
             return getattr(self, name)
         else:
@@ -28,8 +24,6 @@ def lazyproperty(func: Callable[..., A]) -> Callable[..., A]:
 
     return lazy
 
-
-T = TypeVar('T')
 
 
 def iter_round_visitor(

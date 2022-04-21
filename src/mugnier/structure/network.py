@@ -4,233 +4,168 @@ r"""Data structure for topology of tensors in a network
 """
 
 from __future__ import annotations
-from collections import OrderedDict
-from functools import partial
+from email.policy import default
+
 from itertools import pairwise
+from math import prod
+from typing import Literal, Optional, Tuple
+from weakref import WeakValueDictionary
 
-from typing import Iterable, Literal, Optional
-
-from matplotlib.pyplot import axes
-
-from mugnier.libs.utils import T, Cached, depth_dict, iter_visitor, iter_round_visitor, lazyproperty
-from mugnier.libs.backend import asarray, Array, zeros
+from mugnier.libs.backend import Array, to_gpu, eye, moveaxis, zeros
+from mugnier.libs.utils import depth_dict, iter_round_visitor, iter_visitor
 
 
-class Node(metaclass=Cached):
+class Point:
+    __cache = WeakValueDictionary()  # type: WeakValueDictionary[str, Point]
+
+    def __new__(cls, name: Optional[str] = None):
+        if name is not None and name in cls.__cache:
+            return cls.__cache[name]
+
+        obj = object.__new__(cls)
+
+        if name is not None:
+            cls.__cache[name] = obj
+
+        return obj
 
     def __init__(self, name: Optional[str] = None) -> None:
-        """Node monad."""
         self.name = str(hex(id(self))) if name is None else str(name)
         return
 
+
+class Node(Point):
     def __repr__(self) -> str:
         return f'({self.name})'
 
 
-class Edge(metaclass=Cached):
-
-    def __init__(self, name: Optional[str] = None) -> None:
-        r"""
-        Edge monad.
-        """
-        self.name = str(hex(id(self))) if name is None else str(name)
-        return
-
+class End(Point):
     def __repr__(self) -> str:
         return f'<{self.name}>'
 
 
 class Frame(object):
-    r"""Multi-graph: ({Node}, {Edge}, R_n, R_e), where R_n: Node -> [Edge] while
-    R_e: Edge -> [Node]
-
-    All methods with side-effects should return `None`.
-    """
-
     def __init__(self):
-        self._node2edges = OrderedDict()  # type: OrderedDict[Node, list[Edge]]
-        self._edge2nodes = OrderedDict()  # type: OrderedDict[Edge, list[Node]]
+        self._neighbor = dict()  # type: dict[Point, list[Point]]
+        self._duality = dict()  # type: dict[Tuple[Point, int], Tuple[Point, int]]
         return
 
     @property
-    def nodes(self) -> list[Node]:
-        return list(self._node2edges.keys())
+    def world(self) -> set[Point]:
+        return set(self._neighbor.keys())
 
     @property
-    def edges(self) -> list[Edge]:
-        return list(self._edge2nodes.keys())
-
-    def order(self, obj: Node | Edge) -> int:
-        if isinstance(obj, Node):
-            dct = self._node2edges
-        elif isinstance(obj, Edge):
-            dct = self._edge2nodes
-        else:
-            raise TypeError(
-                f'Only define order for Node or Edge, not {type(obj)}.')
-
-        assert obj in dct
-        return len(dct[obj])
+    def links(self) -> set[Tuple[Point, int, Point, int]]:
+        return {(p, i, q, j) for (p, i), (q, j) in self._duality.items()}
 
     @property
-    def open_edges(self):
-        return [e for e in self.edges if self.order(e) == 1]
+    def nodes(self) -> set[Node]:
+        return {p for p in self._neighbor.keys() if isinstance(p, Node)}
 
     @property
-    def end_points(self):
-        return [n for n in self.nodes if self.order(n) == 1]
+    def ends(self) -> set[End]:
+        return {p for p in self._neighbor.keys() if isinstance(p, End)}
 
-    def add_nodes(self,
-                  nodes: list[Node],
-                  edge: Optional[Edge] = None) -> None:
-        assert nodes
-        if edge is None:
-            edge = Edge(name='-'.join(n.name for n in nodes))
+    def order(self, p: Node):
+        return len(self._neighbor[p])
 
-        if edge not in self._edge2nodes:
-            self._edge2nodes[edge] = []
-        self._edge2nodes[edge] += nodes
-        for n in nodes:
-            if n not in self._node2edges:
-                self._node2edges[n] = []
-            self._node2edges[n] += [edge]
+    def add_link(self, p: Point, q: Point) -> None:
+        for _p in [p, q]:
+            if _p not in self._neighbor:
+                self._neighbor[_p] = []
+            elif isinstance(_p, End):
+                raise RuntimeError(f'End {_p} cannot link to more than one points.')
 
+        i = len(self._neighbor[p])
+        j = len(self._neighbor[q])
+        self._duality[(p, i)] = (q, j)
+        self._duality[(q, j)] = (p, i)
+
+        self._neighbor[p].append(q)
+        self._neighbor[q].append(p)
         return
 
-    def add_edges(self,
-                  edges: list[Edge],
-                  node: Optional[Node] = None) -> None:
-        assert edges
-        if node is None:
-            node = Node(name='*'.join(n.name for n in edges))
+    def near_points(self, key: Point) -> list[Point]:
+        return list(self._neighbor[key])
 
-        if node not in self._node2edges:
-            self._node2edges[node] = []
-        self._node2edges[node] += edges
-        for e in edges:
-            if e not in self._edge2nodes:
-                self._edge2nodes[e] = []
-            self._edge2nodes[e] += [node]
+    def near_nodes(self, key: Point) -> list[Node]:
+        return [n for n in self._neighbor[key] if isinstance(n, Node)]
 
-        return
+    def dual(self, p: Point, i: int) -> Tuple[Point, int]:
+        return self._duality[(p, i)]
 
-    def near_node(self, node: Node) -> list[Edge]:
-        return self._node2edges[node]
+    def find_axes(self, p: Point, q: Point) -> Tuple[int, int]:
+        i = self._neighbor[p].index(q)
+        j = self._neighbor[q].index(p)
+        return i, j
 
-    def near_edge(self, edge: Edge) -> list[Node]:
-        return self._edge2nodes[edge]
-
-    def next_nodes(self, node: Node) -> list[Node]:
-        assert node in self.nodes
-
-        ans = list()
-        for e in self._node2edges[node]:
-            ans += [n for n in self._edge2nodes[e] if n is not node]
-
-        return ans
-
-    def next_edges(self, edge: Edge) -> list[Edge]:
-        assert edge in self.edges
-
-        ans = list()
-        for n in self._edge2nodes[edge]:
-            ans += [e for e in self._node2edges[n] if e is not edge]
-
-        return ans
-
-    @property
-    def node_graph(self) -> dict[Node, list[Node]]:
-        """
-        Undirectional node graph in dictionary.
-        """
-        return {n: self.next_nodes(n) for n in self.nodes}
-
-    def find_link(self, n1: Node, n2: Node):
-        es1 = self._node2edges[n1]
-        es2 = self._node2edges[n2]
-        cap = set(es1) & set(es2)
-
-        if len(cap) == 1:
-            e = cap.pop()
-            i = self._node2edges[n1].index(e)
-            j = self._node2edges[n2].index(e)
-            return (n1, i, n2, j)
-
-        else:
-            raise NotImplementedError(
-                f'Not support between {n1} and {n2} non-direct case and multi-graph.'
-            )
+    def node_link_visitor(self, start: Node):
+        nodes = [n for n in iter_round_visitor(start, self.near_nodes)]
+        axes_list = [self.find_axes(n1, n2) for n1, n2 in pairwise(nodes)]
+        return [(p, i, q, j) for (p, q), (i, j) in zip(pairwise(nodes), axes_list)]
 
     def node_visitor(self, start: Node, method: Literal['DFS', 'BFS'] = 'DFS'):
-        return list(iter_visitor(start, self.next_nodes, method=method))
+        return list(iter_visitor(start, self.near_nodes, method=method))
 
-    def link_visitor(self, start: Node):
-        nodes = [n for n in iter_round_visitor(start, self.next_nodes)]
-        return [self.find_link(n1, n2) for n1, n2 in pairwise(nodes)]
-
-    def visitor(self, start: Node):
-
-        def _r(obj: Node | Edge) -> list[Edge | Node]:
-            if isinstance(obj, Node):
-                dct = self._node2edges
-            else:
-                assert isinstance(obj, Edge)
-                dct = self._edge2nodes
-            return dct[obj]
-
-        return list(iter_round_visitor(start, _r))
+    def visitor(self, start: Point, method: Literal['DFS', 'BFS'] = 'DFS'):
+        return list(iter_visitor(start, self.near_points, method=method))
 
 
 class Network(object):
     """Network is a Frame with valuation for each node.
     """
+
     def __init__(self, frame: Frame) -> None:
         """
         Args:
             frame: Topology of the tensor network;
-
         """
-
         self.frame = frame
-        self.dofs = frame.end_points
-        self._dims = dict()  # type: dict[Edge, int]
+        self._dims = dict()  # type: dict[Tuple[Point, int], int]
         self._valuation = dict()  # type: dict[Node, Array]
         return
 
-    def claim_array(self, node: Node, array: Array) -> None:
-        assert node in self.frame.nodes and node not in self.frame.end_points
-        assert self.frame.order(node) == array.ndim
+    def _claim_array(self, p: Node, array: Array) -> None:
+        """Prepare the Network settings for a given array according to its shape
+        """
+        assert p in self.frame.nodes
+        order = self.frame.order(p)
+        assert order == array.ndim
+        shape = array.shape
 
-        for i, e in enumerate(self.frame.near_node(node)):
-            if e in self._dims:
-                assert self._dims[e] == array.shape[i]
-            else:
-                self._dims[e] = array.shape[i]
+        for i in range(order):
+            q, j = self.frame.dual(p, i)
+            for pair in [(p, i), (q, j)]:
+                if pair in self._dims:
+                    assert self._dims[pair] == shape[i]
+                else:
+                    self._dims[pair] = shape[i]
         return
 
-    def shape(self, node: Node) -> list[Optional[int]]:
-        assert node in self.frame.nodes
+    def shape(self, p: Point) -> list[Optional[int]]:
+        assert p in self.frame.world
 
-        node_shape = [None] * self.frame.order(node)
-
-        for i, e in enumerate(self.frame.near_node(node)):
-            if e in self._dims:
-                node_shape[i] = self._dims[e]
+        if isinstance(p, End):
+            dim = self._dims.get((p, 0))
+            node_shape = [dim, dim]
+        else:
+            for i in range(self.frame.order(p)):
+                node_shape[i] = self._dims.get((p, i))
         return node_shape
 
     def __getitem__(self, node: Node) -> Array:
         return self._valuation[node]
 
     def __setitem__(self, node: Node, array: Array) -> None:
-        self.claim_array(node, array)
+        self._claim_array(node, array)
         self._valuation[node] = array
         return
 
-    def __delitem__(self, node: Node):
+    def __delitem__(self, node: Node) -> None:
         del self._valuation[node]
         return
 
-    def fill_zeros(self, dims: Optional[dict[Edge, int]] = None) -> None:
+    def fill_zeros(self, dims: Optional[dict[Tuple[Node, int], int]] = None, default_dim: int = 1) -> None:
         """
         Fill the unassigned part of model with proper shape arrays.
         Specify the dimension for each Edge in dims (default is 1).
@@ -238,14 +173,22 @@ class Network(object):
         if dims is None:
             dims = dict()
 
-        for n in self.frame.nodes:
-            if n not in self.dofs and n not in self._valuation:
-                shape = [
-                    self._dims.get(e, dims.get(e, 1))
-                    for e in self.frame.near_node(n)
-                ]
-                self[n] = zeros(shape)
+        nodes = self.frame.nodes
+        order = self.frame.order
+        dual = self.frame.dual
+        valuation = self._valuation
+        saved_dims = self._dims
 
+        for p in nodes:
+            if p not in valuation:
+                shape = [saved_dims.get((p, i), dims.get((p, i), dims.get(dual(p, i), default_dim)))
+                         for i in range(order(p))]
+                self[p] = zeros(shape)
+
+        return
+
+    def to_gpu(self) -> None:
+        self._valuation = {n: to_gpu(a) for n, a in self._valuation.items()}
         return
 
 
@@ -258,7 +201,6 @@ class State(Network):
         super().__init__(frame)
 
         self._root = root
-        self._depthes = None    # type: Optional[dict[Node, int]]
         self._axes = None  # type: Optional[dict[Node, Optional[int]]]
         return
 
@@ -270,27 +212,51 @@ class State(Network):
     def root(self, value: Node) -> None:
         assert value in self.frame.nodes
         self._root = value
-        self._depthes = None
         self._axes = None
         return
-
-    @property
-    def depthes(self) -> dict[Node, int]:
-        if self._depthes is None:
-            ans = depth_dict(self.root, self.frame.next_nodes)
-            self._depthes = ans
-        else:
-            ans = self._depthes
-        return ans
 
     @property
     def axes(self) -> dict[Node, Optional[int]]:
         if self._axes is None:
             ans = {self.root: None}
-            for m, i, n, j in self.frame.link_visitor(self.root):
+            for m, _, n, j in self.frame.node_link_visitor(self.root):
                 if m in ans and n not in ans:
                     ans[n] = j
             self._axes = ans
         else:
             ans = self._axes
         return ans
+
+    @property
+    def depth(self) -> dict[Point, int]:
+        return depth_dict(self.root, self.frame.near_points)
+
+    def fill_eyes(self, dims: Optional[dict[Tuple[Node, int], int]] = None, default_dim: int = 1) -> None:
+        """
+        Fill the unassigned part of model with proper shape arrays.
+        Specify the each dimension tensors (default is 1).
+        """
+        if dims is None:
+            dims = dict()
+        nodes = self.frame.nodes
+        order = self.frame.order
+        dual = self.frame.dual
+        valuation = self._valuation
+        saved_dims = self._dims
+        axes = self.axes
+
+        for p in nodes:
+            if p not in valuation:
+                ax = axes[p]
+                shape = [saved_dims.get((p, i), dims.get((p, i), dims.get(dual(p, i), default_dim)))
+                         for i in range(order(p))]
+                if ax is None:
+                    ans = zeros((prod(shape), ))
+                    ans[0] = 1.0
+                    ans = ans.reshape(shape)
+                else:
+                    _m = shape.pop(ax)
+                    _n = prod(shape)
+                    ans = moveaxis(eye(_m, _n).reshape([_m] + shape), 0, ax)
+                self[p] = ans
+        return

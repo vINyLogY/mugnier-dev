@@ -1,21 +1,21 @@
 # coding: utf-8
 
 from itertools import chain
-from typing import Iterable, Optional, Tuple
+from typing import Optional, Tuple
 
-from numpy import array
 
-from mugnier.libs.backend import MAX_EINSUM_AXES, Array, as_array, einsum, eye, stack
-from mugnier.structure.network import Edge, Node, State
+from mugnier.libs.backend import MAX_EINSUM_AXES, Array, to_gpu, einsum, eye, stack
+from mugnier.structure.network import End, Node, State
 
 
 class SumProdOp(object):
     stacked_ax = 0
 
-    def __init__(self, op_list: list[dict[Edge, Array]]) -> None:
+    def __init__(self, op_list: list[dict[End, Array]]) -> None:
         n_max = len(op_list)
         tensors = dict()
 
+        # Densify the op_list
         for term in op_list:
             for e, a in term.items():
                 assert a.ndim == 2 and a.shape[0] == a.shape[1]
@@ -28,7 +28,7 @@ class SumProdOp(object):
         self._valuation = {e: stack(tensors[e])}
         return
 
-    def __getitem__(self, key: Edge) -> Optional[Array]:
+    def __getitem__(self, key: End) -> Optional[Array]:
         return self._valuation.get(key)
 
     @staticmethod
