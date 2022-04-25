@@ -3,18 +3,21 @@ r"""Backend for accelerated array-operations.
 """
 
 from numpy.typing import ArrayLike, NDArray
-from numpy import stack, moveaxis, reshape
 
 import torch
 import numpy as np
 
 MAX_EINSUM_AXES = 52  # restrition from torch.einsum as of PyTorch 1.10
+PI = np.pi
 
 # CPU settings
 
 dtype = np.complex64
 Array = NDArray[dtype]
 
+
+def arange(n: int) -> Array:
+    return np.arange(n, dtype=dtype)
 
 def array(a: ArrayLike) -> Array:
     return np.array(a, dtype=dtype)

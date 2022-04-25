@@ -1,5 +1,4 @@
 # coding: utf-8
-from platform import node
 from typing import Tuple
 from mugnier.libs.backend import array
 from mugnier.structure.frame import MultiLayerMCTDH, Singleton, TensorTrain
@@ -58,5 +57,5 @@ def test_operator():
 
 
 if __name__ == '__main__':
-    #test_frame()
+    test_frame()
     test_operator()

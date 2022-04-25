@@ -2,7 +2,7 @@
 
 from itertools import chain
 
-from mugnier.libs.backend import (MAX_EINSUM_AXES, Array, OptArray, eye, opt_einsum, opt_sum, optimize, stack)
+from mugnier.libs.backend import (MAX_EINSUM_AXES, Array, OptArray, eye, opt_einsum, opt_sum, optimize, np)
 from mugnier.structure.network import End
 
 
@@ -30,7 +30,7 @@ class SumProdOp(object):
 
         self.n_terms = n_terms
         self._dims = dims
-        self._valuation = {e: optimize(stack(a, axis=0)) for e, a in tensors.items()}  # type: dict[End, OptArray]
+        self._valuation = {e: optimize(np.stack(a, axis=0)) for e, a in tensors.items()}  # type: dict[End, OptArray]
         return
 
     def __getitem__(self, key: End) -> OptArray:

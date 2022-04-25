@@ -11,7 +11,7 @@ from math import prod
 from typing import Literal, Optional, Tuple
 from weakref import WeakValueDictionary
 
-from mugnier.libs.backend import Array, OptArray, optimize, eye, moveaxis, zeros
+from mugnier.libs.backend import Array, OptArray, optimize, eye, zeros, np
 from mugnier.libs.utils import depth_dict, iter_round_visitor, iter_visitor
 
 
@@ -257,6 +257,6 @@ class State(Network):
                 else:
                     _m = shape.pop(ax)
                     _n = prod(shape)
-                    ans = moveaxis(eye(_m, _n).reshape([_m] + shape), 0, ax)
+                    ans = np.moveaxis(eye(_m, _n).reshape([_m] + shape), 0, ax)
                 self[p] = ans
         return

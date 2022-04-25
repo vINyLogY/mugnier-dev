@@ -8,12 +8,17 @@ from mugnier.structure.network import Frame, Node, End, Point
 
 
 class Singleton(Frame):
+    """
+    Attrs:
+        root : the only Node in the frame.
+    """
 
     def __init__(self, ends: list[End]) -> None:
         super().__init__()
         r = Node(f'0')
         for e in ends:
             self.add_link(r, e)
+        self.root = r
         return
 
 
