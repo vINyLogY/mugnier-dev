@@ -3,39 +3,53 @@
 from itertools import chain
 from typing import Optional, Tuple
 
+from torch import tensor
 
-from mugnier.libs.backend import MAX_EINSUM_AXES, Array, to_gpu, einsum, eye, stack
-from mugnier.structure.network import End, Node, State
+
+from mugnier.libs.backend import MAX_EINSUM_AXES, Array, OptArray, opt_sum, optimize, opt_einsum, eye, stack
+from mugnier.structure.network import End
 
 
 class SumProdOp(object):
     stacked_ax = 0
 
     def __init__(self, op_list: list[dict[End, Array]]) -> None:
-        n_max = len(op_list)
+        n_terms = len(op_list)
         tensors = dict()
+        dims = dict()
 
-        # Densify the op_list
         for term in op_list:
             for e, a in term.items():
                 assert a.ndim == 2 and a.shape[0] == a.shape[1]
-                tensors[e] = [eye(a.shape[0], a.shape[1])] * n_max
+                if e in dims:
+                    assert dims[e] == a.shape[0]
+                else:
+                    dims[e] = a.shape[0]
 
+        # Densify the op_list along DOFs to axis-0
+        tensors = {e: [eye(dim, dim)] * n_terms for e, dim in dims.items()}
         for n, term in enumerate(op_list):
             for e, a in term.items():
                 tensors[e][n] = a
 
-        self._valuation = {e: stack(tensors[e])}
+        self.n_terms = n_terms
+        self._dims = dims
+        self._valuation = {e: optimize(stack(a, axis=0)) for e, a in tensors.items()}  # type: dict[End, OptArray]
         return
 
-    def __getitem__(self, key: End) -> Optional[Array]:
+    def __getitem__(self, key: End) -> Optional[OptArray]:
         return self._valuation.get(key)
 
+    @property
+    def ends(self) -> set[End]:
+        return set(self._dims.keys())
+
     @staticmethod
-    def transform(tensor: Array, op_list: dict[int, Array]):
+    def transform(tensor: OptArray, op_dict: dict[int, Optional[OptArray]]) -> OptArray:
+        op_dict = {j: a for j, a in op_dict.items() if a is not None}
         order = tensor.ndim
-        n = len(op_list)
-        ax_list, mat_list = zip(*sorted(mat_list.items()))
+        n = len(op_dict)
+        ax_list, mat_list = zip(*op_dict.items())
         op_ax = 1 + order + n
         assert op_ax < MAX_EINSUM_AXES
 
@@ -44,68 +58,29 @@ class SumProdOp(object):
         ans_axes = [op_ax] + [order + ax_list.index(j) if j in ax_list else j for j in range(order)]
         args.append((ans_axes, ))
 
-        ans = einsum(*chain(*args)).detach()
+        ans = opt_einsum(*chain(*args))
 
         return ans
 
     @staticmethod
-    def overlap(tensor1: Array, tensor2: Array, ax: Optional[int] = None):
+    def overlap(tensor1: OptArray, tensor2: OptArray, ax: int) -> OptArray:
         assert tensor1.shape == tensor2.shape
-        order = len(tensor1.shape)
-        op_ax = order
+        order = tensor1.ndim
         assert order + 2 < MAX_EINSUM_AXES
 
         axes1 = list(range(order))
         axes1[0] = order
         axes2 = list(range(order))
         axes2[0] = order
+        axes1[ax + 1] = order + 1
+        axes2[ax + 1] = order + 2
 
-        if ax is not None:
-            axes1[ax + 1] = order + 1
-            axes2[ax + 1] = order + 2
-
-        ans = einsum(tensor1, axes1, tensor2, axes2)
+        ans = opt_einsum(tensor1, axes1, tensor2, axes2, [order, order + 1, order + 2])
         return ans
 
+    @staticmethod
+    def reduce(array: OptArray) -> OptArray:
+        return opt_sum(array, 0)
 
-class SumProdEOM(object):
-    r"""Solve the equation wrt Sum-of-Product operator:
-        d/dt |state> = [op] |state>
-    """
-
-    def __init__(self, op: SumProdOp, state: State) -> None:
-        self._op = op
-        self._state = state
-        self._mean_fields = dict()  # type: dict[Tuple[Node, int], Optional[Array]]
-        self._reduced_densities = dict()  # type: dict[Tuple[Node, int], Array]
-        return
-
-    def single_diff(self, node: Node) -> Array:
-        state = self._state
-        op = [(i, self.mean_field(state)[node, i]) for i, _ in range(state.frame.order(node))]
-
-        if node is not state.root:
-            raise NotImplementedError
-
-    def single_propagator(self, node: Node) -> Array:
-        pass
-
-    def mean_fields(self, node: Node, i: int) -> Optional[Array]:
-        edge = self._state.frame.near_node(node)[i]
-        if edge in self._state.dofs:
-            return self._op[edge]
-
-        try:
-            return self._mean_fields[node, i]
-        except IndexError:
-            _n = self._state.frame.next_nodes(node)[i]
-            _a = self._state[_n]
-            tmp = self._op.transform(_a, {_i: self.mean_fields(_n, _i) for _i in range(_a.ndim)})
-
-            ans = self._op.overlap(tmp)
-
-            self._mean_fields[(node, i)] = ans
-            return ans
-
-    def reduced_densities(self, node: Node) -> Array:
-        raise NotImplementedError
+    def expand(self, array: OptArray) -> OptArray:
+        return array.reshape([1] + array.shape).expand([self.n_terms] + array.shape)

@@ -11,7 +11,7 @@ from math import prod
 from typing import Literal, Optional, Tuple
 from weakref import WeakValueDictionary
 
-from mugnier.libs.backend import Array, to_gpu, eye, moveaxis, zeros
+from mugnier.libs.backend import Array, OptArray, optimize, eye, moveaxis, zeros
 from mugnier.libs.utils import depth_dict, iter_round_visitor, iter_visitor
 
 
@@ -122,7 +122,7 @@ class Network(object):
         """
         self.frame = frame
         self._dims = dict()  # type: dict[Tuple[Point, int], int]
-        self._valuation = dict()  # type: dict[Node, Array]
+        self._valuation = dict()  # type: dict[Node, OptArray]
         return
 
     def _claim_array(self, p: Node, array: Array) -> None:
@@ -153,17 +153,21 @@ class Network(object):
                 node_shape[i] = self._dims.get((p, i))
         return node_shape
 
-    def __getitem__(self, node: Node) -> Array:
+    def __getitem__(self, node: Node) -> OptArray:
         return self._valuation[node]
 
     def __setitem__(self, node: Node, array: Array) -> None:
         self._claim_array(node, array)
-        self._valuation[node] = array
+        self._valuation[node] = optimize(array)
         return
 
     def __delitem__(self, node: Node) -> None:
         del self._valuation[node]
         return
+
+    @property
+    def ends(self):
+        return self.frame.ends
 
     def fill_zeros(self, dims: Optional[dict[Tuple[Node, int], int]] = None, default_dim: int = 1) -> None:
         """
@@ -185,10 +189,6 @@ class Network(object):
                          for i in range(order(p))]
                 self[p] = zeros(shape)
 
-        return
-
-    def to_gpu(self) -> None:
-        self._valuation = {n: to_gpu(a) for n, a in self._valuation.items()}
         return
 
 
