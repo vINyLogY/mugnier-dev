@@ -2,7 +2,6 @@
 from platform import node
 from typing import Tuple
 from mugnier.libs.backend import array
-from mugnier.libs.utils import depth_dict, huffman_tree
 from mugnier.structure.frame import MultiLayerMCTDH, Singleton, TensorTrain
 from mugnier.structure.network import Node, End, Point, State
 from mugnier.structure.operator import SumProdOp

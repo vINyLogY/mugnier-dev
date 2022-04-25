@@ -1,7 +1,8 @@
 # coding: utf-8
 
-from itertools import chain
-from typing import Optional, Tuple
+from itertools import chain, count
+from time import time
+from typing import Generator, Optional, Tuple
 from mugnier.libs.backend import OptArray, opt_einsum, opt_exp, MAX_EINSUM_AXES
 from mugnier.structure.network import End, Node, Point, State
 from mugnier.structure.operator import SumProdOp
@@ -33,8 +34,8 @@ class SumProdEOM(object):
         assert op.ends == state.ends
         self._op = op
         self._state = state
-        self._mean_fields = dict()  # type: dict[Tuple[Node, int], Optional[OptArray]]
-        self._reduced_densities = dict()  # type: dict[Tuple[Node, int], OptArray]
+        self._mean_fields = dict()  # type: dict[Tuple[Node, int], OptArray]
+        self._reduced_densities = dict()  # type: dict[Node, OptArray]
         return
 
     def single_diff(self, node: Node) -> OptArray:
@@ -44,6 +45,7 @@ class SumProdEOM(object):
         if node is not self._state.root:
             raise NotImplementedError
 
+        array = self._op.expand(array)
         array = self._op.transform(array, op_list)
         return self._op.reduce(array)
 
@@ -69,7 +71,7 @@ class SumProdEOM(object):
         self._state[node] = array
         return
 
-    def mean_field(self, p: Point, i: int) -> Optional[OptArray]:
+    def mean_field(self, p: Point, i: int) -> OptArray:
         q, j = self._state.frame.dual(p, i)
 
         if isinstance(q, End):
@@ -83,12 +85,25 @@ class SumProdEOM(object):
         return ans
 
     def _mean_field_with_node(self, p: Node, i: int):
-        a = self._state[p]
+        a = self._op.expand(self._state[p])
         op_list = {j: self.mean_field(p, j) for j in range(a.ndim) if j != i}
-        return self._op.overlap(self._op.transform(a, op_list), self._op.extend(a.conj()), ax=i)
+        return self._op.trace(self._op.transform(a, op_list), self._op.extend(a.conj()), ax=i)
 
     def reduced_densities(self, p: Node) -> OptArray:
-        raise NotImplementedError
+        try:
+            ans = self._reduced_densities[p]
+        except IndexError:
+            raise NotImplementedError
 
-    def propagator(steps=None, internal=0.1, start=0.0):
-        pass
+        return ans
+
+    def propagator(self,
+                   steps: Optional[int] = None,
+                   internal: float = 0.1) -> Generator[Tuple[float, State], None, None]:
+        root = self._state.root
+        for n in count():
+            if steps is not None and n >= steps:
+                break
+            time = n * internal
+            yield (time, self._state)
+            self.single_node_split_propagate(root, dt=internal)
