@@ -5,25 +5,26 @@ A *restart* of `minimisTN`. Seperate graph-related algorithm and tensor operatio
 
 ## Outlines & Style
 
+- `.structure` for all method based on EOM with a sum-of-prod type of generator.
 
-
-- structure.network
-- Method: 算法的抽象类
+- Method: 
+    - HEOM
+    - MCTDH (TODO)
 
 
 ## Setup
 
 - Development setup: 
     
-    0. Create python virtural environment with python vesion >= 3.10.
+    0. Create a python virtural environment with python vesion >= 3.10.
 
     1. Prepare dependencies: `numpy`, `pytorch`.
 
-        (For Apple silicon, complie NumPy locally to make use of `Accelerate` and AMX for best performace.)
+        (For Apple silicon, complie `numpy` locally to make use of `Accelerate` and AMX for best performace.)
 
     2. Install `mugnier` in develop mode using `pip`:
 
             pip install -e .
 
-    3. For testing examples, install `jupyter-lab` and `matplotlib`.
+    3. For testing examples, install `jupyter-lab`, `matplotlib`, and `tqdm`.
 

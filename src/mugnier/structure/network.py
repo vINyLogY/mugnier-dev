@@ -149,8 +149,7 @@ class Network(object):
             dim = self._dims.get((p, 0))
             node_shape = [dim, dim]
         else:
-            for i in range(self.frame.order(p)):
-                node_shape[i] = self._dims.get((p, i))
+            node_shape = [self._dims.get((p, i)) for i in range(self.frame.order(p))]
         return node_shape
 
     def __getitem__(self, node: Node) -> OptArray:
@@ -160,6 +159,10 @@ class Network(object):
         self._claim_array(node, array)
         self._valuation[node] = optimize(array)
         return
+
+    def opt_update(self, node: Node, array: OptArray) -> None:
+        assert node in self._valuation
+        self._valuation[node] = array
 
     def __delitem__(self, node: Node) -> None:
         del self._valuation[node]

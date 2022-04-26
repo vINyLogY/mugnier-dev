@@ -39,7 +39,17 @@ class Correlation(object):
         self.coefficients = array(cs)
         self.conj_coefficents = array(ccs)
         self.derivatives = array(ds)
+        self.k_max = len(cs)
         return
+
+    def print(self):
+        string = f"""Correlation coefficents:
+            c: {self.coefficients};
+            (c* = {self.conj_coefficents};)
+            gamma: {self.derivatives}.
+        """
+        print(string)
+
 
 
 class BoseEinstein(object):
@@ -156,6 +166,25 @@ class Drude(SpectrualDensity):
         distribution_func: Callable[[complex], complex],
     ) -> Tuple[list[complex], list[complex], list[complex]]:
 
+        _c = -2.0j * self.l * self.g * distribution_func(-1.0j * self.g)
+        _d = -self.g
+
+        return [_c], [np.conj(_c)], [_d]
+
+
+class DiscreteVibration(SpectrualDensity):
+
+    def __init__(self, frequency, coupling):
+        self.w = frequency
+        self.g = coupling
+
+    def func(self, w: complex) -> complex:
+        return 0.0
+
+    def hta_correlations(
+        self,
+        distribution_func: Callable[[complex], complex],
+    ) -> Tuple[list[complex], list[complex], list[complex]]:
         _c = -2.0j * self.l * self.g * distribution_func(-1.0j * self.g)
         _d = -self.g
 

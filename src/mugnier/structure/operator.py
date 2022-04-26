@@ -1,6 +1,7 @@
 # coding: utf-8
 
 from itertools import chain
+from typing import Iterable
 
 from mugnier.libs.backend import (MAX_EINSUM_AXES, Array, OptArray, eye, opt_einsum, opt_sum, optimize, np)
 from mugnier.structure.network import End
@@ -29,7 +30,7 @@ class SumProdOp(object):
                 tensors[e][n] = a
 
         self.n_terms = n_terms
-        self._dims = dims
+        self._dims = dims  # type: dict[End, int]
         self._valuation = {e: optimize(np.stack(a, axis=0)) for e, a in tensors.items()}  # type: dict[End, OptArray]
         return
 
@@ -41,48 +42,23 @@ class SumProdOp(object):
         return set(self._dims.keys())
 
     @staticmethod
-    def transform(tensors: OptArray, op_dict: dict[int, OptArray]) -> OptArray:
+    def transform(tensors: OptArray, op_dict: dict[int, OptArray]) -> Iterable:
         order = tensors.ndim - 1
+
         n = len(op_dict)
-        ax_list, mat_list = zip(*op_dict.items())
+        ax_list = list(sorted(range(order), key=(lambda ax: tensors.shape[ax + 1])))
+        mat_list = [op_dict[ax] for ax in ax_list]
         op_ax = 1 + order + n
+
         assert op_ax < MAX_EINSUM_AXES
 
         args = [(tensors, [op_ax] + list(range(order)))]
         args.extend((mat_list[i], [op_ax, order + i, ax_list[i]]) for i in range(n))
-        ans_axes = [op_ax] + [order + ax_list.index(j) if j in ax_list else j for j in range(order)]
-        args.append((ans_axes, ))
+        ans_axes = [op_ax] + [order + ax_list.index(ax) if ax in ax_list else ax for ax in range(order)]
+        args.append((ans_axes,))
 
         ans = opt_einsum(*chain(*args))
 
-        return ans
-
-    @staticmethod
-    def trace(tensors1: OptArray, tensors2: OptArray, axis_left: int) -> OptArray:
-        assert tensors1.shape == tensors2.shape
-        order = tensors1.ndim - 1
-        op_ax = order
-        assert op_ax + 2 < MAX_EINSUM_AXES
-
-        axes1 = [op_ax] + list(range(order))
-        axes2 = [op_ax] + list(range(order))
-        axes1[axis_left + 1] = op_ax + 1
-        axes2[axis_left + 1] = op_ax + 2
-
-        ans = opt_einsum(tensors1, axes1, tensors2, axes2, [op_ax, op_ax + 1, op_ax + 2])
-        return ans
-
-    @staticmethod
-    def overlap(tensors1: OptArray, tensors2: OptArray) -> OptArray:
-        assert tensors1.shape == tensors2.shape
-        order = tensors1.ndim - 1
-        op_ax = order
-        assert op_ax < MAX_EINSUM_AXES
-
-        axes1 = [op_ax] + list(range(order))
-        axes2 = [op_ax] + list(range(order))
-
-        ans = opt_einsum(tensors1, axes1, tensors2, axes2, [op_ax])
         return ans
 
     @staticmethod
@@ -90,4 +66,5 @@ class SumProdOp(object):
         return opt_sum(array, 0)
 
     def expand(self, array: OptArray) -> OptArray:
-        return array.reshape([1] + array.shape).expand([self.n_terms] + array.shape)
+        shape = list(array.shape)
+        return array.reshape([1] + shape).expand([self.n_terms] + shape)

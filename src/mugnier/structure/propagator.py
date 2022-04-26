@@ -1,28 +1,29 @@
 # coding: utf-8
 
+from functools import partial
 from itertools import chain, count
-from time import time
-from typing import Generator, Optional, Tuple
-from mugnier.libs.backend import OptArray, opt_einsum, opt_exp, MAX_EINSUM_AXES
+from math import prod
+from typing import Callable, Generator, Optional, Tuple
+from mugnier.libs.backend import OptArray, opt_einsum, MAX_EINSUM_AXES, np
 from mugnier.structure.network import End, Node, Point, State
 from mugnier.structure.operator import SumProdOp
 
+import torch
 
-def transform(tensor: OptArray, op_dict: dict[int, Optional[OptArray]]) -> OptArray:
-    op_dict = {j: a for j, a in op_dict.items() if a is not None}
+
+def transform(tensor: OptArray, op_dict: dict[int, OptArray]) -> OptArray:
     order = tensor.ndim
-    n = len(op_dict)
-    ax_list, mat_list = zip(*op_dict.items())
-    assert order + n < MAX_EINSUM_AXES
+    assert len(op_dict) == order
+    assert 2 * order < MAX_EINSUM_AXES
+
+    ax_list = list(sorted(range(order), key=(lambda ax: tensor.shape[ax])))
+    mat_list = [op_dict[ax] for ax in ax_list]
 
     args = [(tensor, list(range(order)))]
-    args.extend((mat_list[i], [order + i, ax_list[i]]) for i in range(n))
-    ans_axes = [order + ax_list.index(j) if j in ax_list else j for j in range(order)]
-    args.append((ans_axes, ))
+    args.extend((mat_list[i], [order + ax_list[i], ax_list[i]]) for i in range(order))
+    args.append(([order + ax_list[i] for i in range(order)],))
 
-    ans = opt_einsum(*chain(*args))
-
-    return ans
+    return opt_einsum(*chain(*args))
 
 
 class SumProdEOM(object):
@@ -34,42 +35,67 @@ class SumProdEOM(object):
         assert op.ends == state.ends
         self._op = op
         self._state = state
+
         self._mean_fields = dict()  # type: dict[Tuple[Node, int], OptArray]
         self._reduced_densities = dict()  # type: dict[Node, OptArray]
         return
 
-    def single_diff(self, node: Node) -> OptArray:
-        array = self._state[node]
-        op_list = {i: self.mean_field(node, i) for i in range(array.ndim)}
+    def single_diff(self, node: Node) -> Callable[[OptArray], OptArray]:
+        order = self._state.frame.order(node)
+        op_list = {i: self.mean_field(node, i) for i in range(order)}
+        expand = self._op.expand
+        transform = self._op.transform
+        reduce = self._op.reduce
 
-        if node is not self._state.root:
-            raise NotImplementedError
+        def _diff(array: OptArray) -> OptArray:
+            assert array.ndim == order
+            return reduce(transform(expand(array), op_list))
 
-        array = self._op.expand(array)
-        array = self._op.transform(array, op_list)
-        return self._op.reduce(array)
+        return _diff
 
-    def single_node_split_propagate(self, node: Node, dt: float) -> None:
-        array = self._state[node]
-        ops = {i: self.mean_field(node, i) for i in range(array.ndim)}
+    # def single_node_split_propagate(self, node: Node, dt: float) -> None:
+    #     array = self._state[node]
+    #     ops = {i: self.mean_field(node, i) for i in range(array.ndim)}
 
-        if node is not self._state.root:
-            raise NotImplementedError
+    #     if node is not self._state.root:
+    #         raise NotImplementedError
 
-        us = {i: opt_exp(-0.5j * dt * a) for i, a in ops.items() if a is not None}
+    #     us = {i: opt_exp(0.5 * dt * a) for i, a in ops.items()}
 
-        n_terms = len(self._op.ends)
+    #     n_terms = len(self._op.ends)
 
-        for n in range(n_terms):
-            un = {i: a[n] for i, a in us.items()}
-            array = transform(array, un)
+    #     for n in range(n_terms):
+    #         un = {i: a[n] for i, a in us.items()}
+    #         array = transform(array, un)
 
-        for n in reversed(range(n_terms)):
-            un = {i: a[n] for i, a in us.items()}
-            array = transform(array, un)
+    #     for n in reversed(range(n_terms)):
+    #         un = {i: a[n] for i, a in us.items()}
+    #         array = transform(array, un)
 
-        self._state[node] = array
-        return
+    #     self._state.opt_update(node, array)
+    #     return
+
+    # def single_node_propagator(self, node: Node) -> OptArray:
+    #     array = self._state[node]
+    #     dims = array.shape
+    #     order = array.ndim
+
+    #     if node is not self._state.root:
+    #         raise NotImplementedError
+
+    #     ax_list = list(sorted(range(order), key=(lambda ax: dims[ax])))
+    #     mat_list = [self.mean_field(node, ax) for ax in ax_list]
+
+    #     op_ax = 2 * order
+
+    #     from_axes = list(range(order))
+    #     to_axes = list(range(order, 2 * order))
+
+    #     args = [(mat_list[i], [op_ax, order + ax_list[i], ax_list[i]]) for i in range(order)]
+    #     args.append((to_axes + from_axes,))
+    #     diff = opt_einsum(*chain(*args))
+
+    #     return diff
 
     def mean_field(self, p: Point, i: int) -> OptArray:
         q, j = self._state.frame.dual(p, i)
@@ -97,13 +123,28 @@ class SumProdEOM(object):
 
         return ans
 
+    @staticmethod
+    def rk4(diff, y0, dt):
+        k1 = diff(y0)
+        k2 = diff(y0 + 0.5 * dt * k1)
+        k3 = diff(y0 + 0.5 * dt * k2)
+        k4 = diff(y0 + dt * k3)
+        c1 = 1.0 / 6.0
+        c2 = 1.0 / 3.0
+        return (y0 + c1 * (k1 + k4) + c2 * (k2 + k3))
+
     def propagator(self,
                    steps: Optional[int] = None,
-                   internal: float = 0.1) -> Generator[Tuple[float, State], None, None]:
+                   interval: float = 0.1) -> Generator[Tuple[float, State], None, None]:
         root = self._state.root
+
         for n in count():
             if steps is not None and n >= steps:
                 break
-            time = n * internal
+            time = n * interval
             yield (time, self._state)
-            self.single_node_split_propagate(root, dt=internal)
+
+            func = self.single_diff(root)
+            new_array = self.rk4(func, self._state[root], interval)
+
+            self._state.opt_update(root, new_array)

@@ -26,26 +26,30 @@ class ExtendedDensityTensor(State):
 
         ext = zeros((prod(dims),))
         ext[0] = 1.0
-        rho_n = np.tensordot(ext, rdo, axes=0).reshape(dims + shape)
-        self[self.root] = rho_n
+        array = np.tensordot(rdo, ext, axes=0).reshape(shape + dims)
+        self[self.root] = array
 
         return
 
 
 class Hierachy(SumProdOp):
 
-    def __init__(self, dims: list[int], sys_hamiltonian: Array, sys_op: Array, correlation: Correlation) -> None:
-        self.k_max = len(dims)
-        self.dims = dims
+    def __init__(self, sys_hamiltonian: Array, sys_op: Array, correlation: Correlation, dims: list[int]) -> None:
+
         self.h = sys_hamiltonian
         self.op = sys_op
+
         self.coefficients = correlation.coefficients
         self.conj_coefficents = correlation.conj_coefficents
         self.derivatives = correlation.derivatives
 
+        self.k_max = len(dims)
+        self.dims = dims
+
         super().__init__(self.op_list)
         return
 
+    @property
     def op_list(self):
         _i = End('H-i')
         _j = End('H-j')
@@ -63,7 +67,7 @@ class Hierachy(SumProdOp):
             ck = self.coefficients[k]
             cck = self.conj_coefficents[k]
             dk = self.derivatives[k]
-            fk = 0.5
+            fk = 1.0
 
             ops = [
                 {
