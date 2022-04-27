@@ -1,11 +1,11 @@
 # coding: utf-8
 """Metas."""
 from __future__ import annotations
+
 from builtins import map, zip
 from itertools import tee
 from operator import itemgetter
-from typing import Callable, Generator, Iterable, Literal, Optional, TypeVar, Tuple
-
+from typing import (Callable, Generator, Iterable, Literal, Optional, Tuple, TypeVar)
 
 T = TypeVar('T')
 
@@ -25,10 +25,7 @@ def lazyproperty(func: Callable[..., T]) -> Callable[..., T]:
     return lazy
 
 
-
-def iter_round_visitor(
-        start: T,
-        r: Callable[[T], list[T]]) -> Generator[Tuple[T, bool], None, None]:
+def iter_round_visitor(start: T, r: Callable[[T], list[T]]) -> Generator[Tuple[T, bool], None, None]:
     """Iterative round-trip visitor. Only support 'DFS' (depth first) method.
 
     Args:
@@ -41,17 +38,13 @@ def iter_round_visitor(
         if vertex not in visited:
             visited.add(vertex)
             nexts = [n for n in r(vertex) if n not in visited]
-            stack.extend(
-                nexts[i // 2] if i % 2 else vertex
-                for i in range(2 * len(nexts))
-            )
+            stack.extend(nexts[i // 2] if i % 2 else vertex for i in range(2 * len(nexts)))
         yield vertex
 
 
-def iter_visitor(
-        start: T,
-        r: Callable[[T], list[T]],
-        method: Literal['DFS', 'BFS'] = 'DFS') -> Generator[Tuple[T, int], None, None]:
+def iter_visitor(start: T,
+                 r: Callable[[T], list[T]],
+                 method: Literal['DFS', 'BFS'] = 'DFS') -> Generator[Tuple[T, int], None, None]:
     """Iterative visitor.
 
     Args:
@@ -100,8 +93,11 @@ def huffman_tree(sources: list[T],
     if importances is None:
         importances = [1] * len(sources)
 
-    def fst(x): return x[0]
-    def snd(x): return x[1]
+    def fst(x):
+        return x[0]
+
+    def snd(x):
+        return x[1]
 
     sequence = list(zip(sources, importances))
     graph = dict()

@@ -1,9 +1,10 @@
 # coding: utf-8
 from typing import Tuple
 from mugnier.libs.backend import array
-from mugnier.structure.frame import MultiLayerMCTDH, Singleton, TensorTrain
-from mugnier.structure.network import Node, End, Point, State
-from mugnier.structure.operator import SumProdOp
+from mugnier.state.model import CannonialModel
+from mugnier.state.template import MultiLayerMCTDH, Singleton, TensorTrain
+from mugnier.state.frame import Node, End, Point
+from mugnier.operator.spo import SumProdOp
 
 
 
@@ -25,7 +26,7 @@ def test_frame():
         else:
             return 5
 
-    s1 = State(f1, f1.train[0])
+    s1 = CannonialModel(f1, f1.train[0])
     s1.fill_eyes({(p, i): dim(p, q) for p, i, q, _ in f1.links})
 
     for n in f1.node_visitor(f1.train[0]):

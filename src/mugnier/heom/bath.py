@@ -5,51 +5,14 @@ Decomposition of the bath and BE distribution
 """
 from __future__ import annotations
 
-from typing import Callable, Literal, Optional, Tuple
+from typing import Literal, Optional, Tuple
 
-from mugnier.libs.backend import Array, array, PI, np
+from mugnier.libs.backend import PI, Array, array, np
 
 
-def tridiag_eigsh(subdiag: Array) -> Array:
+def _tridiag_eigsh(subdiag: Array) -> Array:
     mat = np.diag(subdiag, -1) + np.diag(subdiag, 1)
     return np.sort(np.linalg.eigvalsh(mat))[::-1]
-
-
-class Correlation(object):
-
-    def __init__(self, spd: SpectrualDensity, distribution: BoseEinstein):
-        """
-        n : int
-            number of the terms in the basis functions
-        beta : float, optional
-            Inverse temperature; 1 / (k_B T); `None` indicates zero temperature.
-        """
-        self.spd = spd
-        self.distribution = distribution
-
-        cs, ccs, ds = spd.hta_correlations(distribution.func)
-
-        for res, pole in distribution.residues:
-            _c = -2.0j * PI * res * spd.func(pole)
-            _d = -1.0j * pole
-            cs.append(_c)
-            ccs.append(np.conj(_c))
-            ds.append(_d)
-
-        self.coefficients = array(cs)
-        self.conj_coefficents = array(ccs)
-        self.derivatives = array(ds)
-        self.k_max = len(cs)
-        return
-
-    def print(self):
-        string = f"""Correlation coefficents:
-            c: {self.coefficients};
-            (c* = {self.conj_coefficents};)
-            gamma: {self.derivatives}.
-        """
-        print(string)
-
 
 
 class BoseEinstein(object):
@@ -110,11 +73,11 @@ class BoseEinstein(object):
         assert n > 0
 
         subdiag_q = array([1.0 / np.sqrt((2 * i + 3) * (2 * i + 5)) for i in range(2 * n - 1)])
-        zetas = 2.0 / tridiag_eigsh(subdiag_q)[:n]
+        zetas = 2.0 / _tridiag_eigsh(subdiag_q)[:n]
         roots_q = np.power(zetas, 2)
 
         subdiag_p = array([1.0 / np.sqrt((2 * i + 5) * (2 * i + 7)) for i in range(2 * n - 2)])
-        roots_p = np.power(2.0 / tridiag_eigsh(subdiag_p)[:n - 1], 2)
+        roots_p = np.power(2.0 / _tridiag_eigsh(subdiag_p)[:n - 1], 2)
 
         residues = np.zeros((n,))
         for i in range(n):
@@ -129,63 +92,107 @@ class BoseEinstein(object):
         return array(residues), array(zetas)
 
 
-class SpectrualDensity(object):
+class Correlation(object):
 
-    def __init__(self):
-        pass
+    def __init__(self, distribution: BoseEinstein) -> None:
+        self.distribution = distribution
 
-    def func(self, w: complex) -> complex:
-        return NotImplemented
+        self.coefficients = list()  # type: list[complex]
+        self.conj_coefficents = list()  # type: list[complex]
+        self.derivatives = list()  # type: list[complex]
 
-    def hta_correlations(
-        self,
-        distribution_func: Callable[[complex], complex],
-    ) -> Tuple[list[complex], list[complex], list[complex]]:
-        """
-        Returns: 
-            coefficients, conjugate coefficients, derivatives
-        """
+        self.get_correlation()
+        self.get_correction()
+        return
+
+    @property
+    def k_max(self) -> int:
+        return len(self.derivatives)
+
+    def spectral_density(self, w: complex) -> complex:
         raise NotImplementedError
 
+    def get_correlation(self) -> None:
+        pass
 
-class Drude(SpectrualDensity):
+    def get_correction(self) -> None:
+        pass
 
-    def __init__(self, reorganization_energy, relaxation) -> None:
+    def print(self) -> None:
+        string = f"""Correlation coefficents:
+            c: {array(self.coefficients)};
+            (c* = {array(self.conj_coefficents)};)
+            gamma: {array(self.derivatives)}.
+        """
+        print(string)
+
+    def __add__(self, other: Correlation) -> Correlation:
+        assert isinstance(other, Correlation)
+        assert self.distribution.beta == other.distribution.beta
+        cls = type(self)
+        distr = type(self.distribution)
+        obj = cls(distribution=distr(beta=self.distribution.beta))
+        for attr in ['coefficients', 'conj_coefficents', 'derivatives']:
+            setattr(obj, attr, getattr(self, attr) + getattr(other, attr))
+        return obj
+
+
+class Drude(Correlation):
+
+    def __init__(self, reorganization_energy: float, relaxation: float, distribution: BoseEinstein) -> None:
         self.l = reorganization_energy
         self.g = relaxation
 
+        super().__init__(distribution)
         return
 
-    def func(self, w: complex) -> complex:
+    def spectral_density(self, w: complex) -> complex:
         l = self.l
         g = self.g
         return (2.0 / PI) * l * g * w / (w**2 + g**2)
 
-    def hta_correlations(
-        self,
-        distribution_func: Callable[[complex], complex],
-    ) -> Tuple[list[complex], list[complex], list[complex]]:
-
-        _c = -2.0j * self.l * self.g * distribution_func(-1.0j * self.g)
+    def get_correlation(self) -> None:
+        f = self.distribution.func
+        _c = -2.0j * self.l * self.g * f(-1.0j * self.g)
         _d = -self.g
+        self.coefficients.append(_c)
+        self.conj_coefficents.append(np.conj(_c))
+        self.derivatives.append(_d)
 
-        return [_c], [np.conj(_c)], [_d]
+        return
+
+    def correction(self) -> Tuple[list[complex], list[complex], list[complex]]:
+        zipped = [
+            (-2.0j * PI * res * self.spectral_density(pole), -1.0j * pole) for res, pole in self.distribution.residues
+        ]
+        _cs, _ds = zip(*zipped)
+
+        self.coefficients.extend(_cs)
+        self.conj_coefficents.extend(np.conj(_c) for _c in _cs)
+        self.derivatives.extend(_ds)
+
+        return
 
 
-class DiscreteVibration(SpectrualDensity):
+class DiscreteVibration(Correlation):
 
-    def __init__(self, frequency, coupling):
+    def __init__(self, frequency: float, coupling: float, distribution: BoseEinstein) -> None:
         self.w = frequency
         self.g = coupling
 
-    def func(self, w: complex) -> complex:
+        super().__init__(distribution)
+        return
+
+    def spectral_density(self, w: complex) -> complex:
         return 0.0
 
-    def hta_correlations(
-        self,
-        distribution_func: Callable[[complex], complex],
-    ) -> Tuple[list[complex], list[complex], list[complex]]:
-        _c = -2.0j * self.l * self.g * distribution_func(-1.0j * self.g)
-        _d = -self.g
+    def get_correlation(self) -> None:
+        beta = self.distribution.beta
+        w = self.w
+        g = self.g
+        f = 1.0 / np.tanh(beta * w / 2.0) if beta is not None else 1.0
 
-        return [_c], [np.conj(_c)], [_d]
+        self.coefficients.extend([g**2 / 2.0 * (f + 1.0), g**2 / 2.0 * (f - 1.0)])
+        self.conj_coefficents.extend([g**2 / 2.0 * (f - 1.0), g**2 / 2.0 * (f + 1.0)])
+        self.derivatives.extend([-1.0j * w, +1.0j * w])
+        return

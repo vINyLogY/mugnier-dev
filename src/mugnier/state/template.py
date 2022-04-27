@@ -1,10 +1,9 @@
 # coding: utf-8
 
-from platform import node
-from typing import Iterable, Literal, Optional
-from mugnier.libs.utils import huffman_tree
+from typing import Optional
 
-from mugnier.structure.network import Frame, Node, End, Point
+from mugnier.libs.utils import huffman_tree
+from mugnier.state.frame import End, Frame, Node, Point
 
 
 class Singleton(Frame):
@@ -68,6 +67,7 @@ class Tree(Frame):
     Attrs:
         root : a default root Node of the tree.
     """
+
     def __init__(self, graph: dict[Node, list[Point]], root: Node):
         super().__init__()
         self.root = root
@@ -79,12 +79,11 @@ class Tree(Frame):
 
 class MultiLayerMCTDH(Tree):
 
-    def __init__(self, ends: list[End],
-                 importances: Optional[list[int]] = None,
-                 n_ary: int = 2) -> None:
+    def __init__(self, ends: list[End], importances: Optional[list[int]] = None, n_ary: int = 2) -> None:
         """
         Generate a Tree-like Frame (ML-MCTDH) from a node graph.
         """
+
         class new_node(Node):
             _counter = 0
 

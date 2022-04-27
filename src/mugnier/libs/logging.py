@@ -1,9 +1,9 @@
 # coding: utf-8
 """Interface to logging package.
 """
+import logging
 import os
 import sys
-import logging
 from typing import Literal, Optional
 
 

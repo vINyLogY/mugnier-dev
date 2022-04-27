@@ -7,28 +7,30 @@ from math import prod
 
 from mugnier.heom.bath import Correlation
 from mugnier.libs.backend import Array, arange, eye, np, zeros
-from mugnier.structure.frame import Singleton
-from mugnier.structure.network import End, State
-from mugnier.structure.operator import SumProdOp
+from mugnier.operator.spo import SumProdOp
+from mugnier.state.frame import End
+from mugnier.state.model import CannonialModel
+from mugnier.state.template import Singleton
 
 
-class ExtendedDensityTensor(State):
+def _end(identifier: ...) -> End:
+    return End(f'HEOM-{identifier}')
 
-    def __init__(self, k_max: int) -> None:
-        ends = [End('H-i'), End('H-j')] + [End(f'H-{k}') for k in range(k_max)]
-        f = Singleton(ends)
-        super().__init__(f, f.root)
-        return
 
-    def initialize(self, rdo: Array, dims: list[int]) -> None:
+class ExtendedDensityTensor(CannonialModel):
+
+    def __init__(self, rdo: Array, dims: list[int]) -> None:
         shape = list(rdo.shape)
         assert len(shape) == 2 and shape[0] == shape[1]
+
+        ends = [_end('i'), _end('j')] + [_end(k) for k in range(len(dims))]
+        f = Singleton(ends)
+        super().__init__(f, f.root)
 
         ext = zeros((prod(dims),))
         ext[0] = 1.0
         array = np.tensordot(rdo, ext, axes=0).reshape(shape + dims)
         self[self.root] = array
-
         return
 
 
@@ -51,8 +53,8 @@ class Hierachy(SumProdOp):
 
     @property
     def op_list(self):
-        _i = End('H-i')
-        _j = End('H-j')
+        _i = _end('i')
+        _j = _end('j')
         ans = [
             {
                 _i: -1.0j * self.h
@@ -63,7 +65,7 @@ class Hierachy(SumProdOp):
         ]
 
         for k in range(self.k_max):
-            _k = End(f'H-{k}')
+            _k = _end(k)
             ck = self.coefficients[k]
             cck = self.conj_coefficents[k]
             dk = self.derivatives[k]

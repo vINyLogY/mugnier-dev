@@ -2,7 +2,9 @@
 r"""Unit transformations.
 """
 from __future__ import annotations
+
 from typing import Literal, Optional
+
 from scipy.constants import physical_constants as constants
 
 # 1 au = `atomic_unit_in['some-unit']` some-unit
