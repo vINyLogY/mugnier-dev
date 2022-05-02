@@ -85,7 +85,10 @@ class Integrator(object):
         self._reduced_densities = dict()  # type: dict[Node, OptArray]
         return
 
-    def single_diff(self, node: Node) -> Callable[[OptArray], OptArray]:
+    def split_diff(self, node: Node) -> Callable[[OptArray], OptArray]:
+        if node is not self._state.root:
+            raise NotImplementedError
+
         order = self._state.frame.order(node)
         op_list = {i: self.mean_field(node, i) for i in range(order)}
         expand = self._op.expand
@@ -98,49 +101,27 @@ class Integrator(object):
 
         return _diff
 
-    # def single_node_split_propagate(self, node: Node, dt: float) -> None:
-    #     array = self._state[node]
-    #     ops = {i: self.mean_field(node, i) for i in range(array.ndim)}
+    def split_diff_op(self, node: Node) -> OptArray:
+        if node is not self._state.root:
+            raise NotImplementedError
 
-    #     if node is not self._state.root:
-    #         raise NotImplementedError
+        array = self._state[node]
+        dims = array.shape
+        order = array.ndim
 
-    #     us = {i: opt_exp(0.5 * dt * a) for i, a in ops.items()}
+        ax_list = list(sorted(range(order), key=(lambda ax: dims[ax])))
+        mat_list = [self.mean_field(node, ax) for ax in ax_list]
 
-    #     n_terms = len(self._op.ends)
+        op_ax = 2 * order
 
-    #     for n in range(n_terms):
-    #         un = {i: a[n] for i, a in us.items()}
-    #         array = transform(array, un)
+        from_axes = list(range(order))
+        to_axes = list(range(order, 2 * order))
 
-    #     for n in reversed(range(n_terms)):
-    #         un = {i: a[n] for i, a in us.items()}
-    #         array = transform(array, un)
+        args = [(mat_list[i], [op_ax, order + ax_list[i], ax_list[i]]) for i in range(order)]
+        args.append((to_axes + from_axes,))
+        diff = opt_einsum(*chain(*args))
 
-    #     self._state.opt_update(node, array)
-    #     return
-
-    # def single_node_propagator(self, node: Node) -> OptArray:
-    #     array = self._state[node]
-    #     dims = array.shape
-    #     order = array.ndim
-
-    #     if node is not self._state.root:
-    #         raise NotImplementedError
-
-    #     ax_list = list(sorted(range(order), key=(lambda ax: dims[ax])))
-    #     mat_list = [self.mean_field(node, ax) for ax in ax_list]
-
-    #     op_ax = 2 * order
-
-    #     from_axes = list(range(order))
-    #     to_axes = list(range(order, 2 * order))
-
-    #     args = [(mat_list[i], [op_ax, order + ax_list[i], ax_list[i]]) for i in range(order)]
-    #     args.append((to_axes + from_axes,))
-    #     diff = opt_einsum(*chain(*args))
-
-    #     return diff
+        return diff
 
     def mean_field(self, p: Point, i: int) -> OptArray:
         q, j = self._state.frame.dual(p, i)
@@ -192,7 +173,7 @@ class Integrator(object):
             time = n * interval
             yield (time, self._state)
 
-            func = self.single_diff(root)
+            func = self.split_diff(root)
             new_array = self.rk4(func, self._state[root], interval)
 
             self._state.opt_update(root, new_array)

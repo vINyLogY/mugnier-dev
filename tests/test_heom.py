@@ -1,13 +1,14 @@
 # coding: utf-8
 
+from math import prod, inf
 import numpy as np
 import torch
-from tqdm import tqdm
+from tqdm import tqdm, trange
 from mugnier.libs import backend
 from mugnier.libs.logging import Logger
 from mugnier.libs.quantity import Quantity as __
 from mugnier.heom.hierachy import ExtendedDensityTensor, Hierachy
-from mugnier.heom.bath import Correlation, BoseEinstein, Drude
+from mugnier.heom.bath import BoseEinstein, Drude
 from mugnier.operator.spo import Integrator
 
 
@@ -30,9 +31,19 @@ def test_hierachy():
     s = ExtendedDensityTensor(rdo, dims)
     solver = Integrator(heom_op, s)
 
-    func = solver.single_diff(s.root)
-    diff_norm = np.linalg.norm(func(s[s.root]).to('cpu').numpy())
+    func = solver.split_diff(s.root)
+    diff_norm = np.linalg.norm(func(s[s.root]).cpu().numpy())
     np.testing.assert_almost_equal(0.01611424664290165, diff_norm)
+
+    length = prod(s.shape(s.root))
+    vv = s[s.root].reshape(-1)
+
+    aa = solver.split_diff_op(s.root).reshape((length, length))
+
+    l = torch.linalg.eigvals(aa)
+    filter_ = [i for i, li in enumerate(l) if li.real > 0]
+    print(filter_)
+
 
     # # Propagator settings:
     # callback_interval = 100

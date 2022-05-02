@@ -5,6 +5,8 @@ r"""Backend for accelerated array-operations.
 import numpy as np
 import torch
 from numpy.typing import ArrayLike, NDArray
+import torchdiffeq
+import scipy.integrate
 
 # import opt_einsum as oe
 
@@ -44,7 +46,7 @@ if torch.cuda.is_available():
 else:
     device = 'cpu'
 
-# device = 'cpu'
+device = 'cpu'
 
 opt_dtype = torch.complex128
 OptArray = torch.Tensor
