@@ -1,3 +1,8 @@
+# output files
+*.mp4
+*.pdf
+*.log
+
 ## Ref: https://github.com/github/gitignore
 # Byte-compiled / optimized / DLL files
 __pycache__/

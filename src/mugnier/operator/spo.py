@@ -4,7 +4,7 @@ from itertools import chain, count
 from typing import Callable, Generator, Iterable, Optional, Tuple
 
 import numpy as np
-from mugnier.libs.backend import (MAX_EINSUM_AXES, Array, OptArray, eye, opt_einsum, opt_sum, optimize)
+from mugnier.libs.backend import (MAX_EINSUM_AXES, Array, OptArray, eye, odeint, opt_einsum, opt_sum, optimize)
 from mugnier.state.frame import End, Node, Point
 from mugnier.state.model import CannonialModel
 
@@ -177,3 +177,9 @@ class Integrator(object):
             new_array = self.rk4(func, self._state[root], interval)
 
             self._state.opt_update(root, new_array)
+
+    def odeint(self, interval: float = 1.0, method: str = 'dopri5') -> None:
+        root = self._state.root
+        func = self.split_diff(root)
+        new_array = odeint(func, self._state[root], interval, method=method)
+        self._state.opt_update(root, new_array)

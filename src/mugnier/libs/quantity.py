@@ -89,11 +89,11 @@ class Quantity(object):
 
     def __mul__(self, other: float) -> Quantity:
         cls = type(self)
-        return cls(self.au * other)
+        return cls(self.value * other, unit=self.unit)
 
     def __truediv__(self, other: float) -> Quantity:
         cls = type(self)
-        return cls(self.au / other)
+        return cls(self.value / other, unit=self.unit)
 
     def __eq__(self, other: Quantity | Literal[0]) -> Quantity:
         if hasattr(other, "au"):

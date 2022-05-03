@@ -2,6 +2,7 @@
 r"""Backend for accelerated array-operations.
 """
 
+from typing import Callable, Tuple
 import numpy as np
 import torch
 from numpy.typing import ArrayLike, NDArray
@@ -46,7 +47,7 @@ if torch.cuda.is_available():
 else:
     device = 'cpu'
 
-device = 'cpu'
+# device = 'cpu'
 
 opt_dtype = torch.complex128
 OptArray = torch.Tensor
@@ -65,5 +66,32 @@ def opt_sum(array: OptArray, dim: int) -> OptArray:
     return torch.sum(array, dim=dim).detach()
 
 
-# def opt_tensordot(a: OptArray, b: OptArray, axes: Tuple[list[int], list[int]]) -> OptArray:
-#     return torch.tensordot(a, b, dims=axes).detach()
+def opt_tensordot(a: OptArray, b: OptArray, axes: Tuple[list[int], list[int]]) -> OptArray:
+    return torch.tensordot(a, b, dims=axes).detach()
+
+
+def odeint(func: Callable[[OptArray], OptArray], y0: OptArray, dt: float, method='dopri5'):
+    """Avaliable method from ode methods from 
+    - Adaptive-step:
+        - `dopri8` Runge-Kutta 7(8) of Dormand-Prince-Shampine
+        - `dopri5` Runge-Kutta 4(5) of Dormand-Prince.
+        - `bosh3` Runge-Kutta 2(3) of Bogacki-Shampine
+        - `adaptive_heun` Runge-Kutta 1(2)
+    - Fixed-step:
+        - `euler` Euler method.
+        - `midpoint` Midpoint method.
+        - `rk4` Fourth-order Runge-Kutta with 3/8 rule.
+        - `explicit_adams` Explicit Adams.
+        - `implicit_adams` Implicit Adams.
+    """
+
+    def _func(_t, _y):
+        """wrap a complex function to a 2D real function"""
+        y = func(_y[0] + 1.0j * _y[1])
+        return torch.stack([y.real, y.imag])
+
+    _y0 = torch.stack([y0.real, y0.imag])
+    _t = torch.tensor([0.0, dt], device=device)
+    # y1 = torchdiffeq.odeint(_func, _y0, _t, method='scipy_solver', options={'solver': 'BDF'})
+    y1 = torchdiffeq.odeint(_func, _y0, _t, method=method).detach()
+    return (y1[1][0] + 1.0j * y1[1][1])

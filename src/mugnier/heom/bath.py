@@ -4,6 +4,7 @@
 Decomposition of the bath and BE distribution
 """
 from __future__ import annotations
+from math import gamma
 
 from typing import Literal, Optional, Tuple
 
@@ -100,9 +101,6 @@ class Correlation(object):
         self.coefficients = list()  # type: list[complex]
         self.conj_coefficents = list()  # type: list[complex]
         self.derivatives = list()  # type: list[complex]
-
-        self.get_correlation()
-        self.get_correction()
         return
 
     @property
@@ -113,10 +111,19 @@ class Correlation(object):
         raise NotImplementedError
 
     def get_correlation(self) -> None:
-        pass
+        raise NotImplementedError
 
     def get_correction(self) -> None:
-        pass
+        zipped = [
+            (-2.0j * PI * res * self.spectral_density(pole), -1.0j * pole) for res, pole in self.distribution.residues
+        ]
+        if zipped:
+            _cs, _ds = zip(*zipped)
+            self.coefficients.extend(_cs)
+            self.conj_coefficents.extend(np.conj(_c) for _c in _cs)
+            self.derivatives.extend(_ds)
+
+        return
 
     def print(self) -> None:
         string = f"""Correlation coefficents:
@@ -144,6 +151,8 @@ class Drude(Correlation):
         self.g = relaxation
 
         super().__init__(distribution)
+        self.get_correlation()
+        self.get_correction()
         return
 
     def spectral_density(self, w: complex) -> complex:
@@ -161,38 +170,69 @@ class Drude(Correlation):
 
         return
 
-    def correction(self) -> Tuple[list[complex], list[complex], list[complex]]:
-        zipped = [
-            (-2.0j * PI * res * self.spectral_density(pole), -1.0j * pole) for res, pole in self.distribution.residues
-        ]
-        _cs, _ds = zip(*zipped)
-
-        self.coefficients.extend(_cs)
-        self.conj_coefficents.extend(np.conj(_c) for _c in _cs)
-        self.derivatives.extend(_ds)
-
-        return
-
 
 class DiscreteVibration(Correlation):
+    rtol = 0.01
 
     def __init__(self, frequency: float, coupling: float, distribution: BoseEinstein) -> None:
-        self.w = frequency
+        self.w0 = frequency
         self.g = coupling
 
         super().__init__(distribution)
+        self.get_correlation()
         return
 
     def spectral_density(self, w: complex) -> complex:
-        return 0.0
+        w0 = self.w0
+        tol = self.rtol * w0
+        return self.g**2 / (2.0 * tol) if abs(w - w0) < tol else 0.0
 
     def get_correlation(self) -> None:
         beta = self.distribution.beta
-        w = self.w
+        w0 = self.w0
         g = self.g
-        f = 1.0 / np.tanh(beta * w / 2.0) if beta is not None else 1.0
+        f = 1.0 / np.tanh(beta * w0 / 2.0) if beta is not None else 1.0
 
         self.coefficients.extend([g**2 / 2.0 * (f + 1.0), g**2 / 2.0 * (f - 1.0)])
         self.conj_coefficents.extend([g**2 / 2.0 * (f - 1.0), g**2 / 2.0 * (f + 1.0)])
-        self.derivatives.extend([-1.0j * w, +1.0j * w])
+        self.derivatives.extend([-1.0j * w0, +1.0j * w0])
+        return
+
+    def get_correction(self) -> None:
+        """No corrections for discrete vibrations"""
+        return
+
+
+class Brownian(Correlation):
+
+    def __init__(self, reorganization_energy: float, frequency: float, relaxation: float,
+                 distribution: BoseEinstein) -> None:
+        self.w0 = frequency
+        self.g = relaxation
+        self.l = reorganization_energy
+
+        super().__init__(distribution)
+        self.get_correlation()
+        self.get_correction()
+        return
+
+    def spectral_density(self, w: complex) -> complex:
+        l = self.l
+        g = self.g
+        w0 = self.w0
+        return (4.0 / PI) * l * g * (w0**2 + g**2) * w / ((w + w0)**2 + g**2) / ((w - w0)**2 + g**2)
+
+    def get_correlation(self) -> None:
+        f = self.distribution.func
+        l = self.l
+        g = self.g
+        w0 = self.w0
+
+        a = l * (w0**2 + g**2) / w0
+        c1 = +a * f(-1.0j * (g + 1.0j * w0))
+        c2 = -a * f(-1.0j * (g - 1.0j * w0))
+
+        self.coefficients.extend([c1, c2])
+        self.conj_coefficents.extend([np.conj(c2), np.conj(c1)])
+        self.derivatives.extend([-(g + 1.0j * w0), -(g - 1.0j * w0)])
         return

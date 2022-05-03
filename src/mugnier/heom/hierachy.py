@@ -3,13 +3,13 @@
 """Generating the derivative of the extended rho in SoP formalism.
 """
 
-from email.mime import base
 from math import prod, sqrt
+from os import stat
 from typing import Tuple
 from mugnier.basis.dvr import SineDVR
 
 from mugnier.heom.bath import Correlation
-from mugnier.libs.backend import Array, arange, eye, np, zeros
+from mugnier.libs.backend import Array, OptArray, arange, eye, np, opt_tensordot, optimize, zeros
 from mugnier.operator.spo import SumProdOp
 from mugnier.state.frame import End
 from mugnier.state.model import CannonialModel
@@ -36,10 +36,14 @@ class ExtendedDensityTensor(CannonialModel):
         self[self.root] = array
         return
 
+    def get_rdo(self) -> OptArray:
+        array = self[self.root]
+        dim = array.shape[0]
+        return array.reshape((dim, dim, -1))[:, :, 0]
+
 
 class Hierachy(SumProdOp):
-
-    scale_factor = 1.0
+    scaling_factor = 1.0
 
     def __init__(self, sys_hamiltonian: Array, sys_op: Array, correlation: Correlation, dims: list[int]) -> None:
 
@@ -72,14 +76,13 @@ class Hierachy(SumProdOp):
             ck = self.coefficients[k]
             cck = self.conj_coefficents[k]
             dk = self.derivatives[k]
-
-            if self.scale_factor is None:
+            if self.scaling_factor is None:
                 fk = np.sqrt(np.real(ck + cck))
             else:
-                fk = self.scale_factor
-            print(f'{k}: fk={fk}; fk^(-1)={1.0 / fk}.')
+                fk = self.scaling_factor
+            print(f'f_{k} = {fk}')
 
-            ops = [
+            opk = [
                 {
                     _k: dk * self.numberer(k)
                 },
@@ -92,7 +95,7 @@ class Hierachy(SumProdOp):
                     _k: cck / fk * self.raiser(k) + fk * self.lower(k)
                 },
             ]
-            ans.extend(ops)
+            ans.extend(opk)
 
         return ans
 
@@ -109,29 +112,29 @@ class Hierachy(SumProdOp):
         return np.diag(arange(dim))
 
 
-class SineExtendedDensityTensor(CannonialModel):
+class SineExtendedDensityTensor(ExtendedDensityTensor):
+    scale_factor = 1.0
 
     def __init__(self, rdo: Array, spaces: list[Tuple[float, float, int]]) -> None:
-        shape = list(rdo.shape)
-        assert len(shape) == 2 and shape[0] == shape[1]
-
         bases = [SineDVR(*args) for args in spaces]
         dims = [b.n for b in bases]
+        tfmats = [optimize(b.fock2dvr_mat) for b in bases]
+        super().__init__(rdo, dims)
 
-        ends = [_end('i'), _end('j')] + [_end(k) for k in range(len(dims))]
-        f = Singleton(ends)
-        super().__init__(f, f.root)
+        array = self[self.root]
+        for i, tfmat in enumerate(tfmats):
+            array = opt_tensordot(array, tfmat, ([i + 2], [1])).moveaxis(-1, i + 2)
+        self.opt_update(self.root, array)
 
-        ext = zeros((prod(dims),))
-        ext[0] = 1.0
-        array = np.tensordot(rdo, ext, axes=0).reshape(shape + dims)
-        for i, b in enumerate(bases):
-            tfmat = b.fock2dvr_mat
-            array = np.tensordot(array, tfmat, ([i+2], [1]))
-            array = np.moveaxis(array, -1, i+2)
-
-        self[self.root] = array
+        self.tfmats = tfmats
         return
+
+    def get_rdo(self) -> OptArray:
+        array = self[self.root]
+        dim = array.shape[0]
+        for i, tfmat in enumerate(self.tfmats):
+            array = opt_tensordot(array, tfmat.T, ([i + 2], [1])).moveaxis(-1, i + 2)
+        return array.reshape((dim, dim, -1))[:, :, 0]
 
 
 class SineHierachy(Hierachy):
@@ -144,7 +147,7 @@ class SineHierachy(Hierachy):
         super().__init__(sys_hamiltonian, sys_op, correlation, dims)
         return
 
-    def raiser(self, k: int):
+    def raiser(self, k: int) -> Array:
         return self.bases[k].creation_mat
 
     def lower(self, k: int) -> Array:
