@@ -2,6 +2,7 @@
 *.mp4
 *.pdf
 *.log
+*.png
 
 ## Ref: https://github.com/github/gitignore
 # Byte-compiled / optimized / DLL files

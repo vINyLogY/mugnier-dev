@@ -203,7 +203,7 @@ class DiscreteVibration(Correlation):
         return
 
 
-class Brownian(Correlation):
+class UnderdampedBrownian(Correlation):
 
     def __init__(self, reorganization_energy: float, frequency: float, relaxation: float,
                  distribution: BoseEinstein) -> None:

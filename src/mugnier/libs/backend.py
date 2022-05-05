@@ -16,7 +16,7 @@ PI = np.pi
 
 # CPU settings
 
-dtype = np.complex128
+dtype = np.complex64
 Array = NDArray[dtype]
 
 
@@ -49,27 +49,32 @@ else:
 
 # device = 'cpu'
 
-opt_dtype = torch.complex128
+opt_dtype = torch.complex64
 OptArray = torch.Tensor
 
 
+@torch.no_grad()
 def optimize(array: ArrayLike) -> OptArray:
-    ans = torch.tensor(array, dtype=opt_dtype, device=device).detach()
+    ans = torch.tensor(array, dtype=opt_dtype, device=device)
     return ans
 
 
+@torch.no_grad()
 def opt_einsum(*args) -> OptArray:
-    return torch.einsum(*args).detach()
+    return torch.einsum(*args)
 
 
+@torch.no_grad()
 def opt_sum(array: OptArray, dim: int) -> OptArray:
-    return torch.sum(array, dim=dim).detach()
+    return torch.sum(array, dim=dim)
 
 
+@torch.no_grad()
 def opt_tensordot(a: OptArray, b: OptArray, axes: Tuple[list[int], list[int]]) -> OptArray:
-    return torch.tensordot(a, b, dims=axes).detach()
+    return torch.tensordot(a, b, dims=axes)
 
 
+@torch.no_grad()
 def odeint(func: Callable[[OptArray], OptArray], y0: OptArray, dt: float, method='dopri5'):
     """Avaliable method from ode methods from 
     - Adaptive-step:
@@ -93,5 +98,5 @@ def odeint(func: Callable[[OptArray], OptArray], y0: OptArray, dt: float, method
     _y0 = torch.stack([y0.real, y0.imag])
     _t = torch.tensor([0.0, dt], device=device)
     # y1 = torchdiffeq.odeint(_func, _y0, _t, method='scipy_solver', options={'solver': 'BDF'})
-    y1 = torchdiffeq.odeint(_func, _y0, _t, method=method).detach()
+    y1 = torchdiffeq.odeint(_func, _y0, _t, method=method)
     return (y1[1][0] + 1.0j * y1[1][1])

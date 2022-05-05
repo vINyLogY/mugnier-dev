@@ -1,6 +1,6 @@
 # coding: utf-8
 
-from mugnier.heom.bath import (BoseEinstein, Brownian, Correlation, DiscreteVibration, Drude)
+from mugnier.heom.bath import (BoseEinstein, Correlation, DiscreteVibration, Drude, UnderdampedBrownian)
 from mugnier.heom.hierachy import (ExtendedDensityTensor, Hierachy, SineExtendedDensityTensor, SineHierachy)
 from mugnier.libs import backend
 from mugnier.libs.logging import Logger
@@ -26,7 +26,7 @@ corr = Correlation(distr)
 if include_drude:
     corr += Drude(__(200, '/cm').au, __(50, '/cm').au, distr)
 if include_brownian:
-    corr += Brownian(__(500, '/cm').au, __(1500, '/cm').au, __(50, '/cm').au, distr)
+    corr += UnderdampedBrownian(__(500, '/cm').au, __(1500, '/cm').au, __(50, '/cm').au, distr)
 
 # HEOM basis settings
 use_dvr = False
@@ -87,7 +87,8 @@ def test_hierachy():
 
 
 if __name__ == '__main__':
-    # f_dir = os.path.abspath(os.path.dirname(__file__))
-    # os.chdir(f_dir)
+    import os
+    f_dir = os.path.abspath(os.path.dirname(__file__))
+    os.chdir(os.path.join(f_dir, 'data'))
 
     test_hierachy()

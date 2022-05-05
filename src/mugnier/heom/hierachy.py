@@ -1,10 +1,8 @@
-#!/usr/bin/env python
 # coding: utf-8
 """Generating the derivative of the extended rho in SoP formalism.
 """
 
 from math import prod, sqrt
-from os import stat
 from typing import Tuple
 from mugnier.basis.dvr import SineDVR
 
@@ -80,7 +78,7 @@ class Hierachy(SumProdOp):
                 fk = np.sqrt(np.real(ck + cck))
             else:
                 fk = self.scaling_factor
-            print(f'f_{k} = {fk}')
+            # print(f'f_{k} = {fk}')
 
             opk = [
                 {
