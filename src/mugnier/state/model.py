@@ -1,8 +1,9 @@
 from math import prod
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 
-from mugnier.libs.backend import (Array, OptArray, array, eye, np, optimize, zeros)
+from mugnier.libs.backend import (Array, OptArray, array, eye, np, opt_qr, opt_tensordot, optimize, zeros)
 from mugnier.state.frame import End, Frame, Node, Point
+from mugnier.libs.utils import depths
 
 
 class Model:
@@ -94,6 +95,7 @@ class CannonialModel(Model):
 
         self._root = root
         self._axes = None  # type: Optional[dict[Node, Optional[int]]]
+        self._depths = None  # type: Optional[dict[Node, Optional[int]]]
         return
 
     @property
@@ -105,6 +107,7 @@ class CannonialModel(Model):
         assert value in self.frame.nodes
         self._root = value
         self._axes = None
+        self._depths = None
         return
 
     @property
@@ -115,9 +118,16 @@ class CannonialModel(Model):
                 if m in ans and n not in ans:
                     ans[n] = j
             self._axes = ans
-        else:
-            ans = self._axes
-        return ans
+
+        return self._axes
+
+    @property
+    def depths(self) -> dict[Node, int]:
+        if self._depths is None:
+            ans = depths(self.root, self.frame.near_nodes)
+            self._depths = ans
+
+        return self._depths
 
     def fill_eyes(self, dims: Optional[dict[Tuple[Node, int], int]] = None, default_dim: int = 1) -> None:
         """
@@ -149,4 +159,54 @@ class CannonialModel(Model):
                     _n = prod(shape)
                     ans = np.moveaxis(eye(_m, _n).reshape([_m] + shape), 0, ax)
                 self[p] = ans
+        return
+
+    def split_unite_move(self,
+                         i: int,
+                         op: Optional[Callable[[OptArray], OptArray]] = None,
+                         rank: Optional[int] = None,
+                         tol: Optional[float] = None) -> None:
+        m = self.root
+        assert i < self.frame.order(m)
+
+        n, j = self.frame.dual(m, i)
+        dim = self._dims[(m, i)]
+        shape = self.shape(m).pop(i)
+
+        mat_m = self[m].moveaxis(i, -1).reshape((-1, dim))
+        q, mid = opt_qr(mat_m, rank, tol)
+        array_m = q.reshape(shape + [-1]).moveaxis(-1, i)
+        self.opt_update(m, array_m)
+        self.root = n
+
+        if op is not None:
+            mid = op(mid)
+
+        array_n = opt_tensordot(mid, self[n], ([1], [j])).moveaxis(0, j)
+        self.opt_update(n, array_n)
+        return
+
+    def unite_split_move(self,
+                         i: int,
+                         op: Optional[Callable[[OptArray], OptArray]] = None,
+                         rank: Optional[int] = None,
+                         tol: Optional[float] = None) -> None:
+        m = self.root
+        assert i < self.frame.order(m)
+
+        n, j = self.frame.dual(m, i)
+        shape_m = self.shape(m).pop(i)
+        shape_n = self.shape(n).pop(j)
+
+        mid = opt_tensordot(self[m], self[n], ([i], [j]))
+        if op is not None:
+            mid = op(mid)
+
+        q, r = opt_qr(mid.reshape((prod(shape_m), prod(shape_n))), rank, tol)
+        array_m = q.reshape(shape_m + [-1]).moveaxis(-1, i)
+        self.opt_update(m, array_m)
+        self.root = n
+
+        array_n = r.reshape([-1] + shape_n).moveaxis(0, j)
+        self.opt_update(n, array_n)
         return

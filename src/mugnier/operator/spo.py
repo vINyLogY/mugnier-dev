@@ -1,10 +1,16 @@
 # coding: utf-8
 
+from functools import cache
 from itertools import chain, count
+from os import stat
+from turtle import shape
 from typing import Callable, Generator, Iterable, Optional, Tuple
 
 import numpy as np
-from mugnier.libs.backend import (MAX_EINSUM_AXES, Array, OptArray, eye, odeint, opt_einsum, opt_sum, optimize)
+from torch import float_power
+from mugnier.libs.backend import (MAX_EINSUM_AXES, Array, OptArray, eye, odeint, opt_einsum, opt_sum, opt_tensordot,
+                                  optimize)
+from mugnier.libs.utils import depths
 from mugnier.state.frame import End, Node, Point
 from mugnier.state.model import CannonialModel
 
@@ -31,7 +37,7 @@ class SumProdOp:
                 tensors[e][n] = a
 
         self.n_terms = n_terms
-        self._dims = dims  # type: dict[End, int]
+        self.dims = dims  # type: dict[End, int]
         self._valuation = {e: optimize(np.stack(a, axis=0)) for e, a in tensors.items()}  # type: dict[End, OptArray]
         return
 
@@ -40,18 +46,25 @@ class SumProdOp:
 
     @property
     def ends(self) -> set[End]:
-        return set(self._dims.keys())
+        return set(self.dims.keys())
+
+    def expand(self, tensor: OptArray) -> OptArray:
+        shape = list(tensor.shape)
+        return tensor.unsqueeze(0).expand([self.n_terms] + shape)
 
     @staticmethod
-    def transform(tensors: OptArray, op_dict: dict[int, OptArray]) -> Iterable:
-        order = tensors.ndim - 1
+    def reduce(tensors: OptArray) -> OptArray:
+        return opt_sum(tensors, 0)
 
+    @staticmethod
+    def transforms(tensors: OptArray, op_dict: dict[int, OptArray]) -> OptArray:
+        order = tensors.ndim - 1
         n = len(op_dict)
+        op_ax = order + n
+        assert op_ax < MAX_EINSUM_AXES
+
         ax_list = list(sorted(range(order), key=(lambda ax: tensors.shape[ax + 1])))
         mat_list = [op_dict[ax] for ax in ax_list]
-        op_ax = 1 + order + n
-
-        assert op_ax < MAX_EINSUM_AXES
 
         args = [(tensors, [op_ax] + list(range(order)))]
         args.extend((mat_list[i], [op_ax, order + i, ax_list[i]]) for i in range(n))
@@ -59,55 +72,77 @@ class SumProdOp:
         args.append((ans_axes,))
 
         ans = opt_einsum(*chain(*args))
-
         return ans
 
     @staticmethod
-    def reduce(array: OptArray) -> OptArray:
-        return opt_sum(array, 0)
+    def traces(tensors1: OptArray, tensors2: OptArray, ax: int) -> OptArray:
+        assert tensors1.shape == tensors2.shape
+        order = tensors1.ndim - 1
+        assert ax < order
+        assert order + 2 < MAX_EINSUM_AXES
 
-    def expand(self, array: OptArray) -> OptArray:
-        shape = list(array.shape)
-        return array.unsqueeze(0).expand([self.n_terms] + shape)
+        op_ax = order
+        i_ax = order + 1
+        j_ax = order + 2
+
+        axes1 = list(range(order))
+        axes1[ax] = i_ax
+        axes2 = list(range(order))
+        axes2[ax] = j_ax
+        return opt_einsum(tensors1, [op_ax] + axes1, tensors2, [op_ax] + axes2, [op_ax, i_ax, j_ax])
 
 
-class Integrator(object):
+class MasterEqn(object):
     r"""Solve the equation wrt Sum-of-Product operator:
         d/dt |state> = [op] |state>
     """
 
     def __init__(self, op: SumProdOp, state: CannonialModel) -> None:
         assert op.ends == state.ends
-        self._op = op
-        self._state = state
+        self.op = op
+        self.state = state
 
-        self._mean_fields = dict()  # type: dict[Tuple[Node, int], OptArray]
-        self._reduced_densities = dict()  # type: dict[Node, OptArray]
+        self.mean_fields = dict()  # type: dict[Tuple[Node, int], OptArray]
+        self.densities = dict()  # type: dict[Node, OptArray]
         return
 
-    def split_diff(self, node: Node) -> Callable[[OptArray], OptArray]:
-        if node is not self._state.root:
+    def calculate(self) -> None:
+        self._get_mean_fields()
+        self._get_densities()
+        return
+
+    def node_eom(self, node: Node) -> Callable[[OptArray], OptArray]:
+        ax = self.state.axes[node]
+
+        order = self.state.frame.order(node)
+        op_list = {i: self.mean_fields[node, i] for i in range(order)}
+        expand = self.op.expand
+        transforms = self.op.transforms
+        reduce = self.op.reduce
+        trace = self.op.traces
+
+        def _dd(a: OptArray) -> OptArray:
+            assert a.ndim == order
+            a = expand(a)
+            tmp = transforms(a, op_list)
+            if ax is not None:
+                # Projection
+                projection = transforms(a, {ax: trace(tmp, np.conj(a), ax)})
+                tmp -= projection
+                # Inversion
+                den = self.densities[node]
+                tmp = transforms(tmp, {ax: den.pinverse()})
+            return reduce(tmp)
+
+        return _dd
+
+    def node_eom_op(self, node: Node) -> OptArray:
+        if node is not self.state.root:
             raise NotImplementedError
 
-        order = self._state.frame.order(node)
-        op_list = {i: self.mean_field(node, i) for i in range(order)}
-        expand = self._op.expand
-        transform = self._op.transform
-        reduce = self._op.reduce
-
-        def _diff(array: OptArray) -> OptArray:
-            assert array.ndim == order
-            return reduce(transform(expand(array), op_list))
-
-        return _diff
-
-    def split_diff_op(self, node: Node) -> OptArray:
-        if node is not self._state.root:
-            raise NotImplementedError
-
-        array = self._state[node]
-        dims = array.shape
-        order = array.ndim
+        a = self.state[node]
+        dims = a.shape
+        order = a.ndim
 
         ax_list = list(sorted(range(order), key=(lambda ax: dims[ax])))
         mat_list = [self.mean_field(node, ax) for ax in ax_list]
@@ -123,63 +158,193 @@ class Integrator(object):
 
         return diff
 
-    def mean_field(self, p: Point, i: int) -> OptArray:
-        q, j = self._state.frame.dual(p, i)
 
-        if isinstance(q, End):
-            return self._op[q]
+    def _mean_field_with_node(self, p: Node, i: int) -> OptArray:
+        order = self.state.frame.order(p)
 
-        try:
-            ans = self._mean_fields[(p, i)]
-        except IndexError:
-            ans = self._mean_field_with_node(q, j)
-            self._mean_fields[(p, i)] = ans
-        return ans
+        a = self.op.expand(self.state[p])
+        conj_a = a.conj()
+        op_list = {_i: self.mean_fields[(p, _i)] for _i in range(order) if _i != i}
+        return self.op.traces(conj_a, self.op.transforms(a, op_list), ax=i)
 
-    def _mean_field_with_node(self, p: Node, i: int):
-        a = self._op.expand(self._state[p])
-        op_list = {j: self.mean_field(p, j) for j in range(a.ndim) if j != i}
-        return self._op.trace(self._op.transform(a, op_list), self._op.extend(a.conj()), ax=i)
+    def _get_mean_fields(self) -> None:
+        axes = self.state.axes
+        dual = self.state.frame.dual
+        order = self.state.frame.order
 
-    def reduced_densities(self, p: Node) -> OptArray:
-        try:
-            ans = self._reduced_densities[p]
-        except IndexError:
-            raise NotImplementedError
+        # primitive
+        for q in self.state.ends:
+            p, i = dual(q, 0)
+            self.mean_fields[(p, i)] = self.op[q]
 
-        return ans
+        it = self.state.frame.node_visitor(start=self.state.root, method='BFS')
+        # from leaves to root
+        for q in reversed(it):
+            j = axes[q]
+            if j is not None:
+                p, i = dual(q, j)
+                self.mean_fields[(p, i)] = self._mean_field_with_node(q, j)
+        # from root to leaves
+        for p in it:
+            i = axes[p]
+            if i is not None:
+                q, j = dual(p, i)
+                self.mean_fields[(p, i)] = self._mean_field_with_node(q, j)
 
-    @staticmethod
-    def rk4(diff, y0, dt):
-        a10 = 1.0 / 3.0
-        a20, a21 = -1.0 / 3.0, 1.0
-        a30, a31, a32 = 1.0, -1.0, 1.0
+        return
 
-        k0 = diff(y0)
-        k1 = diff(y0 + dt * (a10 * k0))
-        k2 = diff(y0 + dt * (a20 * k0 + a21 * k1))
-        k3 = diff(y0 + dt * (a30 * k0 + a31 * k1 + a32 * k2))
+    def _get_densities(self) -> None:
+        axes = self.state.axes
+        dual = self.state.frame.dual
+        order = self.state.frame.order
 
-        c0, c1 = 1.0 / 8.0, 3.0 / 8.0
+        for p in self.state.frame.node_visitor(start=self.state.root, method='BFS'):
+            i = axes[p]
+            if i is None:
+                continue
+            q, j = dual(p, i)
+            k = axes[q]
+            a_q = self.state[q]
+            if k is not None:
+                den_q = self.densities[q]
+                a_q = opt_tensordot(den_q , a_q,  ([1], [k]))
+            ops = [_j for _j in range(order(q)) if _j != j]
+            ans = opt_tensordot(a_q.conj(), a_q, (ops, ops))
 
-        return (y0 + c0 * (k0 + k3) + c1 * (k1 + k2))
+            self.densities[p] = ans
+        return
 
-    def propagator(self, steps: Optional[int] = None, interval: float = 1.0) -> Generator[float, None, None]:
-        root = self._state.root
 
-        for n in count():
-            if steps is not None and n >= steps:
-                break
-            time = n * interval
-            yield (time, self._state)
+class Propagator:
+    tol = 1.0e-7
 
-            func = self.split_diff(root)
-            new_array = self.rk4(func, self._state[root], interval)
+    def __init__(self,
+                 op: SumProdOp,
+                 state: CannonialModel,
+                 dt: float,
+                 ode_method: str = 'dopri5',
+                 ps_method: int = 1) -> None:
 
-            self._state.opt_update(root, new_array)
+        self.eom = MasterEqn(op, state)
+        self.state = self.eom.state
+        self.op = self.eom.op
 
-    def odeint(self, interval: float = 1.0, method: str = 'dopri5') -> None:
-        root = self._state.root
-        func = self.split_diff(root)
-        new_array = odeint(func, self._state[root], interval, method=method)
-        self._state.opt_update(root, new_array)
+        self.dt = dt
+        self.ode_method = ode_method
+        self.ps_method = ps_method
+        return
+
+    def direct_step(self) -> None:
+        self.eom.calculate()
+        for p in self.state.frame.node_visitor(self.state.root):
+            self._node_step(p, 1.0)
+        return
+
+    def _node_step(self, p: Node, ratio: float) -> None:
+        ans = self._odeint(self.eom.node_eom(p), self.state[p], ratio)
+        self.state.opt_update(p, ans)
+        return
+
+    def ps1_forward_step(self, ratio: float) -> None:
+        move = self.state.split_unite_move
+        depths = self.state.depths
+
+        it = self.state.frame.node_link_visitor(self.state.root)
+        for p, i, q, j in it:
+            assert p is self.state.root
+            if depths[p] < depths[q]:
+                move(i)
+            else:
+                self._node_step(p, ratio)
+                move(i, op=self._ps1_mid_op(p, i, q, j, -ratio))
+        self._node_step(self.state.root, ratio)
+        return
+
+    def ps1_backward_step(self, ratio: float) -> None:
+        move = self.state.split_unite_move
+        depths = self.state.depths
+
+        self._node_step(self.state.root, ratio)
+        it = reversed(self.state.frame.node_link_visitor(self.state.root))
+        for q, j, p, i in it:
+            assert p is self.state.root
+            if depths[p] < depths[q]:
+                move(i, op=self._ps1_mid_op(p, i, q, j, -ratio))
+                self._node_step(q, ratio)
+            else:
+                move(i)
+
+        return
+
+    def ps2_forward_step(self, ratio: float) -> None:
+        depths = self.state.depths
+        move2 = self.state.unite_split_move
+        move1 = self.state.split_unite_move
+
+        it = list(self.state.frame.node_link_visitor(self.state.root))
+        end = len(it) - 1
+        for n, (p, i, q, j) in enumerate(it):
+            assert p is self.state.root
+            if depths[p] < depths[q]:
+                move1(i)
+            else:
+                move2(p, op=self._ps2_mid_op(p, i, q, j, ratio))
+                if n != end:
+                    self._node_step(q, -ratio)
+        self._node_step(self.state.root, ratio)
+        return
+
+    def ps2_forward_step(self, ratio: float) -> None:
+        depths = self.state.depths
+        move2 = self.state.unite_split_move
+        move1 = self.state.split_unite_move
+
+        self._node_step(self.state.root, ratio)
+        it = reversed(self.state.frame.node_link_visitor(self.state.root))
+        for n, (q, j, p, i) in enumerate(it):
+            assert p is self.state.root
+            if depths[p] < depths[q]:
+                if n != 0:
+                    self._node_step(q, -ratio)
+                move2(i, op=self._ps1_mid_op(p, i, q, j, +ratio))
+            else:
+                move1(i)
+        return
+
+    def _ps1_mid_op(self, p: Node, i: int, q: Node, j: int, ratio: float) -> Callable[[OptArray], OptArray]:
+        """Assue the tensor for p in self.state has been updated."""
+
+        l_mat = self.eom._mean_field_with_node(p, i)
+        r_mat = self.eom._mean_field_with_node(q, j)
+        expand = self.op.expand
+        transform = self.op.transforms
+        reduce = self.op.reduce
+
+        def _dd(a: OptArray) -> OptArray:
+            return reduce(transform(expand(a), {0: l_mat, 1: r_mat}))
+
+        def _op(mid: OptArray) -> OptArray:
+            return self._odeint(_dd, mid, ratio)
+
+        return _op
+
+    def _ps2_mid_op(self, p: Node, i: int, q: Node, j: int, ratio: float) -> Callable[[OptArray], OptArray]:
+        ord_p = self.state.frame.order(p)
+        ord_q = self.state.frame.order(q)
+        l_ops = [self.eom.mean_field(p, _i) for _i in range(ord_p) if _i != i]
+        r_ops = [self.eom.mean_field(q, _j) for _j in range(ord_q) if _j != j]
+        op_dict = dict(enumerate(l_ops + r_ops))
+        expand = self.op.expand
+        transform = self.op.transforms
+        reduce = self.op.reduce
+
+        def _dd(a: OptArray) -> OptArray:
+            return reduce(transform(expand(a), op_dict))
+
+        def _op(mid: OptArray) -> OptArray:
+            return self._odeint(_dd, mid, ratio)
+
+        return _op
+
+    def _odeint(self, func: Callable[[OptArray], OptArray], y0: OptArray, ratio: float):
+        return odeint(func, y0, ratio * self.dt, method=self.ode_method)

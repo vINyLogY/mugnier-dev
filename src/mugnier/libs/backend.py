@@ -2,7 +2,7 @@
 r"""Backend for accelerated array-operations.
 """
 
-from typing import Callable, Tuple
+from typing import Callable, Optional, Tuple
 import numpy as np
 import torch
 from numpy.typing import ArrayLike, NDArray
@@ -47,7 +47,7 @@ if torch.cuda.is_available():
 else:
     device = 'cpu'
 
-# device = 'cpu'
+#device = 'cpu'
 
 opt_dtype = torch.complex64
 OptArray = torch.Tensor
@@ -75,8 +75,32 @@ def opt_tensordot(a: OptArray, b: OptArray, axes: Tuple[list[int], list[int]]) -
 
 
 @torch.no_grad()
+def opt_qr(a: OptArray, rank: Optional[int] = None, tol: Optional[float] = None) -> Tuple[OptArray, OptArray]:
+    u, s, vh = torch.linalg.svd(a, full_matrices=False)
+
+    # Calculate rank from atol
+    if tol is not None:
+        total_error = 0.0
+        for n, s_i in reversed(list(enumerate(s))):
+            total_error += s_i
+            if total_error > tol:
+                rank = n + 1
+                break
+        # default
+        if rank is None:
+            rank = 1
+
+    if rank is not None and rank <= len(s):
+        s = s[:rank]
+        u = u[:, :rank]
+        vh = vh[:rank, :]
+
+    return u, s.diag() @ vh
+
+
+@torch.no_grad()
 def odeint(func: Callable[[OptArray], OptArray], y0: OptArray, dt: float, method='dopri5'):
-    """Avaliable method from ode methods from 
+    """Avaliable method:
     - Adaptive-step:
         - `dopri8` Runge-Kutta 7(8) of Dormand-Prince-Shampine
         - `dopri5` Runge-Kutta 4(5) of Dormand-Prince.

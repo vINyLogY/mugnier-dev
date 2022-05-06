@@ -65,8 +65,8 @@ def iter_visitor(start: T,
             yield vertex
 
 
-def depth_dict(start: T, r: Callable[[T], list[T]]) -> dict[T, int]:
-    """Iterative visitor.
+def depths(start: T, r: Callable[[T], list[T]]) -> dict[T, int]:
+    """Iteratively geerate the depth of each component.
 
     Args:
         start: Initial object
@@ -82,6 +82,27 @@ def depth_dict(start: T, r: Callable[[T], list[T]]) -> dict[T, int]:
             stack.extend(n_.keys())
             ans.update(n_)
     return ans
+
+
+def path(start: T, stop: T, r: Callable[[T], list[T]]) -> list[T]:
+    """Iteratively geerate the depth of each component.
+
+    Args:
+        start: Initial object
+        r: Relation function.
+    """
+    stack, visited = [[start]], set()
+    while stack:
+        path = stack.pop()
+        vertex = path[-1]
+        if vertex is stop:
+            return path
+
+        if vertex not in visited:
+            visited.add(vertex)
+            stack.extend(path + [n] for n in r(vertex) if n not in visited)
+
+    return None
 
 
 def huffman_tree(sources: list[T],

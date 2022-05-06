@@ -99,13 +99,13 @@ class Frame:
         j = self._neighbor[q].index(p)
         return i, j
 
-    def node_link_visitor(self, start: Node):
+    def node_link_visitor(self, start: Node) -> list[Tuple[Node, int, Node, int]]:
         nodes = [n for n in iter_round_visitor(start, self.near_nodes)]
         axes_list = [self.find_axes(n1, n2) for n1, n2 in pairwise(nodes)]
         return [(p, i, q, j) for (p, q), (i, j) in zip(pairwise(nodes), axes_list)]
 
-    def node_visitor(self, start: Node, method: Literal['DFS', 'BFS'] = 'DFS'):
+    def node_visitor(self, start: Node, method: Literal['DFS', 'BFS'] = 'DFS') -> list[Node]:
         return list(iter_visitor(start, self.near_nodes, method=method))
 
-    def visitor(self, start: Point, method: Literal['DFS', 'BFS'] = 'DFS'):
-        return list(iter_visitor(start, self.near_points, method=method))
+    # def visitor(self, start: Point, method: Literal['DFS', 'BFS'] = 'DFS'):
+    #     return list(iter_visitor(start, self.near_points, method=method))

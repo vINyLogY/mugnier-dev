@@ -4,7 +4,7 @@ from mugnier.mctdh.lvn import SpinBosonDensityOperator, SpinBosonLvN
 from mugnier.libs import backend
 from mugnier.libs.logging import Logger
 from mugnier.libs.quantity import Quantity as __
-from mugnier.operator.spo import Integrator
+from mugnier.operator.spo import MasterEqn
 from tqdm import trange
 
 betas = {'HT': __(1 / 100_000, '/K').au, 'ZT': None}
@@ -41,7 +41,7 @@ def iter_lvn():
     s = SpinBosonDensityOperator(rdo, [dim])
     #print(s.shape(s.root))
 
-    solver = Integrator(lvn_op, s)
+    solver = MasterEqn(lvn_op, s)
 
     logger.info('# time rdo00 rdo01 rdo10 rdo11')
     it = trange(steps)
