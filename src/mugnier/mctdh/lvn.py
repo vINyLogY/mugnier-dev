@@ -23,24 +23,29 @@ def _end(identifier: ...) -> End:
 class SpinBosonDensityOperator(CannonialModel):
 
     def __init__(self, rdo: Array, dims: list[int], beta: Optional[float] = None) -> None:
-        if beta is not None:
-            raise NotImplementedError
-
         shape = list(rdo.shape)
         assert len(shape) == 2 and shape[0] == shape[1]
+        dof = len(dims)
 
-        ends = ([_end('i'), _end('j')] + [_end(f'i{k}') for k in range(len(dims))] +
-                [_end(f'j{k}') for k in range(len(dims))])
+        ends = ([_end('i'), _end('j')] + [_end(f'i{k}') for k in range(dof)] + [_end(f'j{k}') for k in range(dof)])
         f = Singleton(ends)
         super().__init__(f, f.root)
-
-        # ZT case
-        ext = zeros((prod(dims), prod(dims)))
-        ext[0, 0] = 1.0
-        array = np.tensordot(rdo, ext, axes=0).reshape(shape + dims + dims)
-        self[self.root] = array
         self.system_size = shape[0]
         self.bath_size = prod(dims)
+        if beta is None:
+            ext = zeros((prod(dims), prod(dims)))
+            ext[0, 0] = 1.0
+            array = np.tensordot(rdo, ext, axes=0).reshape(shape + dims + dims)
+        else:
+            array = rdo
+            for dim in dims:
+                d = [-beta * (n + 0.5) for n in range(dim)]
+                rb = np.exp(d)
+                rb = rb / np.sum(rb)
+                array = np.tensordot(array, np.diag(rb), axes=0)
+            array = array.reshape(shape + dims + dims)
+            array = np.moveaxis(array, [3 + 2 * n for n in range(dof)], [2 + dof + n for n in range(dof)])
+        self[self.root] = array
         return
 
     def get_rdo(self) -> OptArray:

@@ -9,9 +9,9 @@ from mugnier.basis.dvr import SineDVR
 from mugnier.heom.bath import Correlation
 from mugnier.libs.backend import Array, OptArray, arange, eye, np, opt_tensordot, optimize, zeros
 from mugnier.operator.spo import SumProdOp
-from mugnier.state.frame import End
+from mugnier.state.frame import End, Frame, Node
 from mugnier.state.model import CannonialModel
-from mugnier.state.template import Singleton
+from mugnier.state.template import Singleton, TensorTrain
 
 
 def _end(identifier: ...) -> End:
@@ -39,6 +39,38 @@ class ExtendedDensityTensor(CannonialModel):
         dim = array.shape[0]
         return array.reshape((dim, dim, -1))[:, :, 0]
 
+
+class TensorTrainEDT(CannonialModel):
+
+    def __init__(self, rdo: Array, dims: list[int], rank: int = 1) -> None:
+        shape = list(rdo.shape)
+        assert len(shape) == 2 and shape[0] == shape[1]
+
+        ends = [_end(k) for k in range(len(dims))]
+        f = Frame()
+        dof = len(dims)
+        nodes = [Node('Elec')] + [Node(f'{i}') for i in range(dof)]
+        f.add_link(nodes[0], _end('i'))
+        f.add_link(nodes[0], _end('j'))
+        for n in range(dof):
+            f.add_link(nodes[n], nodes[n + 1])
+        for n, e in enumerate(ends):
+            f.add_link(nodes[n + 1], e)
+
+        super().__init__(f, nodes[0])
+
+        ext = zeros((rank,))
+        ext[0] = 1.0
+        array = np.tensordot(rdo, ext, axes=0)
+        self[self.root] = array
+        dim_dct = {f.dual(e, 0): dims[i] for i, e in enumerate(ends)}
+        self.fill_eyes(dims=dim_dct, default_dim=rank)
+        return
+
+    def get_rdo(self) -> OptArray:
+        array = self[self.root]
+        dim = array.shape[0]
+        return array.reshape((dim, dim, -1))[:, :, 0]
 
 class Hierachy(SumProdOp):
     scaling_factor = 1.0

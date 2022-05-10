@@ -1,6 +1,6 @@
 from mugnier.basis.dvr import SineDVR
 from mugnier.heom.bath import (BoseEinstein, Correlation, DiscreteVibration, Drude, UnderdampedBrownian)
-from mugnier.mctdh.lvn import SpinBosonDensityOperator, SpinBosonLvN
+from mugnier.heom.hierachy import Hierachy, ExtendedDensityTensor
 from mugnier.libs import backend
 from mugnier.libs.logging import Logger
 from mugnier.libs.quantity import Quantity as __
@@ -18,7 +18,7 @@ rdo = backend.array([[0.5, 0.5], [0.5, 0.5]])
 
 # Bath settings:
 beta = betas['RT']
-distr = BoseEinstein(n=0, beta=beta)
+distr = BoseEinstein(n=3, beta=beta)
 corr = DiscreteVibration(__(1500, '/cm').au, __(500, '/cm').au, distr)
 dim = 200
 
@@ -28,7 +28,7 @@ interval = __(0.01, 'fs')
 ode_method = 'dopri5'
 
 # logging
-fname = 'LvN' + f'-({dim})-{beta:.4f}'
+fname = 'HEOM' + f'-({dim})-{beta:.4f}'
 
 
 def iter_lvn():
@@ -36,9 +36,9 @@ def iter_lvn():
     logger.info(f'# device:{backend.device}')
     logger.info(f'# dim:{dim} | K:{corr.k_max} | ODE_method:{ode_method} | dt:{interval} ')
 
-    lvn_op = SpinBosonLvN(h, op, [corr], [dim])
-    s = SpinBosonDensityOperator(rdo, [dim], beta=beta)
-    #print(s.shape(s.root))
+    lvn_op = Hierachy(h, op, corr, [dim] * corr.k_max)
+    s = ExtendedDensityTensor(rdo, [dim] * corr.k_max)
+    print(s.shape(s.root))
 
     solver = Propagator(lvn_op, s, interval.au, ode_method=ode_method)
 

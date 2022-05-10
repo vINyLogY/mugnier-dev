@@ -16,7 +16,7 @@ PI = np.pi
 
 # CPU settings
 
-dtype = np.complex64
+dtype = np.complex128
 Array = NDArray[dtype]
 
 
@@ -47,9 +47,9 @@ if torch.cuda.is_available():
 else:
     device = 'cpu'
 
-#device = 'cpu'
+# device = 'cpu'
 
-opt_dtype = torch.complex64
+opt_dtype = torch.complex128
 OptArray = torch.Tensor
 
 
@@ -122,5 +122,5 @@ def odeint(func: Callable[[OptArray], OptArray], y0: OptArray, dt: float, method
     _y0 = torch.stack([y0.real, y0.imag])
     _t = torch.tensor([0.0, dt], device=device)
     # y1 = torchdiffeq.odeint(_func, _y0, _t, method='scipy_solver', options={'solver': 'BDF'})
-    y1 = torchdiffeq.odeint(_func, _y0, _t, method=method)
+    y1 = torchdiffeq.odeint(_func, _y0, _t, method=method, atol=1.0e-11)
     return (y1[1][0] + 1.0j * y1[1][1])

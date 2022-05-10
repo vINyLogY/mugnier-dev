@@ -63,7 +63,7 @@ class SumProdOp:
         op_ax = order + n
         assert op_ax < MAX_EINSUM_AXES
 
-        ax_list = list(sorted(range(order), key=(lambda ax: tensors.shape[ax + 1])))
+        ax_list = list(sorted(op_dict.keys(), key=(lambda ax: tensors.shape[ax + 1])))
         mat_list = [op_dict[ax] for ax in ax_list]
 
         args = [(tensors, [op_ax] + list(range(order)))]
@@ -127,12 +127,16 @@ class MasterEqn(object):
             tmp = transforms(a, op_list)
             if ax is not None:
                 # Projection
-                projection = transforms(a, {ax: trace(tmp, np.conj(a), ax)})
+                projection = transforms(a, {ax: trace(tmp, a.conj(), ax)})
                 tmp -= projection
+
+            ans = reduce(tmp)
+            if ax is not None:
                 # Inversion
                 den = self.densities[node]
-                tmp = transforms(tmp, {ax: den.pinverse()})
-            return reduce(tmp)
+                ans = opt_tensordot(ans, den.pinverse(), ([ax], [1]))
+                ans = ans.moveaxis(-1, ax)
+            return ans
 
         return _dd
 
@@ -157,7 +161,6 @@ class MasterEqn(object):
         diff = opt_einsum(*chain(*args))
 
         return diff
-
 
     def _mean_field_with_node(self, p: Node, i: int) -> OptArray:
         order = self.state.frame.order(p)
@@ -207,7 +210,7 @@ class MasterEqn(object):
             a_q = self.state[q]
             if k is not None:
                 den_q = self.densities[q]
-                a_q = opt_tensordot(den_q , a_q,  ([1], [k]))
+                a_q = opt_tensordot(den_q, a_q, ([1], [k]))
             ops = [_j for _j in range(order(q)) if _j != j]
             ans = opt_tensordot(a_q.conj(), a_q, (ops, ops))
 
