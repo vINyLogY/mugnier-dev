@@ -29,7 +29,7 @@ def test_hierachy():
     dim = 20
     dims = [dim] * corr.k_max
     heom_op = Hierachy(h, op, corr, dims)
-    s = ExtendedDensityTensor(rdo, dims)
+    s = TensorTrainEDT(rdo, dims, rank=19)
     solver = MasterEqn(heom_op, s)
     solver.calculate()
 
@@ -47,8 +47,7 @@ def test_hierachy():
     steps = 1000
     interval = __(0.001, 'fs')
 
-    logger1 = Logger(filename=f'naive_heom_{corr.k_max}({dim})-dt_{interval}-{backend.device}.log',
-                     level='info').logger
+    logger1 = Logger(filename=f'ps1_heom_{corr.k_max}({dim})-dt_{interval}-{backend.device}.log', level='info').logger
     logger1.info('# time_(fs) rdo00 rdo01 rdo10 rdo11')
     propagator = Propagator(heom_op, s, interval.au, ps_method=0)
     it = trange(steps)

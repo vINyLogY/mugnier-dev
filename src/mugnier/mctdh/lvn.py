@@ -55,6 +55,39 @@ class SpinBosonDensityOperator(CannonialModel):
         return opt_einsum(array.reshape((dim_s, dim_s, dim_b, dim_b)), [0, 1, 2, 2], [0, 1])
 
 
+class TensorTrainDO(CannonialModel):
+
+    def __init__(self, rdo: Array, dims: list[int], beta: Optional[float] = None) -> None:
+        shape = list(rdo.shape)
+        assert len(shape) == 2 and shape[0] == shape[1]
+        dof = len(dims)
+
+        ends = ([_end('i'), _end('j')] + [_end(f'i{k}') for k in range(dof)] + [_end(f'j{k}') for k in range(dof)])
+        f = Singleton(ends)
+        super().__init__(f, f.root)
+        self.system_size = shape[0]
+        self.bath_size = prod(dims)
+        if beta is None:
+            ext = zeros((prod(dims), prod(dims)))
+            ext[0, 0] = 1.0
+            array = np.tensordot(rdo, ext, axes=0).reshape(shape + dims + dims)
+        else:
+            array = rdo
+            for dim in dims:
+                d = [-beta * (n + 0.5) for n in range(dim)]
+                rb = np.exp(d)
+                rb = rb / np.sum(rb)
+                array = np.tensordot(array, np.diag(rb), axes=0)
+            array = array.reshape(shape + dims + dims)
+            array = np.moveaxis(array, [3 + 2 * n for n in range(dof)], [2 + dof + n for n in range(dof)])
+        self[self.root] = array
+        return
+
+    def get_rdo(self):
+        raise NotImplementedError
+
+
+
 class SpinBosonLvN(SumProdOp):
 
     def __init__(self, sys_hamiltonian: Array, sys_op: Array, bathes: list[DiscreteVibration],

@@ -45,7 +45,7 @@ def iter_lvn():
     logger.info('# time rdo00 rdo01 rdo10 rdo11')
     it = trange(steps)
     for i in it:
-        solver.direct_step()
+        solver.step()
         _t = interval * i
         _rdo = s.get_rdo()
         logger.info(f'{_t.au} {_rdo[0, 0]} {_rdo[0, 1]} {_rdo[1, 0]} {_rdo[1, 1]}')

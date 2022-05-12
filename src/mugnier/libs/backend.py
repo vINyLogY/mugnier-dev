@@ -47,7 +47,7 @@ if torch.cuda.is_available():
 else:
     device = 'cpu'
 
-# device = 'cpu'
+device = 'cpu'
 
 opt_dtype = torch.complex128
 OptArray = torch.Tensor
