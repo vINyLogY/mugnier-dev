@@ -8,6 +8,7 @@ from typing import Callable, Generator, Iterable, Optional, Tuple
 
 import numpy as np
 from torch import float_power
+from mugnier.libs import backend
 from mugnier.libs.backend import (MAX_EINSUM_AXES, Array, OptArray, eye, odeint, opt_einsum, opt_sum, opt_tensordot,
                                   optimize)
 from mugnier.libs.utils import depths
@@ -226,14 +227,15 @@ class MasterEqn(object):
 
 
 class Propagator:
-    tol = 1.0e-7
+    tol = backend.ODE_TOL
+    max_steps = 1_000_000_000
 
     def __init__(self,
                  op: SumProdOp,
                  state: CannonialModel,
                  dt: float,
                  ode_method: str = 'dopri5',
-                 ps_method: int = 1) -> None:
+                 ps_method: int = 0) -> None:
 
         self.eom = MasterEqn(op, state)
         self.state = self.eom.state
@@ -246,10 +248,17 @@ class Propagator:
         self._node_visitor = self.state.frame.node_visitor(self.state.root)
         self._node_link_visitor = self.state.frame.node_link_visitor(self.state.root)
         self._depths = self.state.depths
+        self._move1 = self.state.split_unite_move
+        self._move2 = self.state.unite_split_move
+        return
+
+    def __iter__(self) -> Generator[float, None, None]:
+        for i in range(self.max_steps):
+            yield (self.dt * i)
+            self.step()
         return
 
     def step(self) -> None:
-
         if self.ps_method == 0:
             self.eom.calculate(for_all=True)
             for p in self._node_visitor:
@@ -259,6 +268,7 @@ class Propagator:
             self.ps1_forward_step(0.5)
             self.ps1_backward_step(0.5)
         elif self.ps_method == 2:
+            self.eom.calculate(for_all=False)
             self.ps2_forward_step(0.5)
             self.ps2_backward_step(0.5)
         else:
@@ -271,7 +281,7 @@ class Propagator:
         return
 
     def ps1_forward_step(self, ratio: float) -> None:
-        move = self.state.split_unite_move
+        move = self._move1
         depths = self._depths
 
         for p, i, q, j in self._node_link_visitor:
@@ -285,7 +295,7 @@ class Propagator:
         return
 
     def ps1_backward_step(self, ratio: float) -> None:
-        move = self.state.split_unite_move
+        move = self._move1
         depths = self._depths
 
         self._node_step(self.state.root, ratio)
@@ -301,13 +311,13 @@ class Propagator:
     def _ps1_mid_op(self, p: Node, i: int, q: Node, j: int, ratio: Optional[float]) -> Callable[[OptArray], OptArray]:
         """Assue the tensor for p in self.state has been updated."""
 
-        l_mat = self.eom._mean_field_with_node(p, i)
-        r_mat = self.eom.mean_fields[p, i]
         expand = self.op.expand
         transforms = self.op.transforms
         reduce = self.op.reduce
 
         def _op(mid: OptArray) -> OptArray:
+            l_mat = self.eom._mean_field_with_node(p, i)
+            r_mat = self.eom.mean_fields[p, i]
             self.eom.mean_fields[q, j] = l_mat
             del self.eom.mean_fields[p, i]
             if ratio is None:
@@ -319,53 +329,59 @@ class Propagator:
         return _op
 
     def ps2_forward_step(self, ratio: float) -> None:
-        depths = self.state.depths
-        move2 = self.state.unite_split_move
-        move1 = self.state.split_unite_move
+        depths = self._depths
+        move2 = self._move2
+        move1 = self._move1
+        tol = self.tol
 
         it = self._node_link_visitor
         end = len(it) - 1
         for n, (p, i, q, j) in enumerate(it):
+            # print(p, i, q, j)
             assert p is self.state.root
             if depths[p] < depths[q]:
                 move1(i, op=self._ps1_mid_op(p, i, q, j, None))
             else:
-                move2(p, op=self._ps2_mid_op(p, i, q, j, ratio))
+                move2(i, op=self._ps2_mid_op(p, i, q, j, ratio), tol=tol)
+                self.eom.mean_fields[q, j] = self.eom._mean_field_with_node(p, i)
+                del self.eom.mean_fields[p, i]
                 if n != end:
                     self._node_step(q, -ratio)
         return
 
     def ps2_backward_step(self, ratio: float) -> None:
-        depths = self.state.depths
-        move2 = self.state.unite_split_move
-        move1 = self.state.split_unite_move
+        depths = self._depths
+        move2 = self._move2
+        move1 = self._move1
+        tol = self.tol
 
         it = reversed(self._node_link_visitor)
         for n, (q, j, p, i) in enumerate(it):
             assert p is self.state.root
+            # print(p, i, q, j)
             if depths[p] < depths[q]:
                 if n != 0:
-                    self._node_step(q, -ratio)
-                move2(i, op=self._ps1_mid_op(p, i, q, j, ratio))
+                    self._node_step(p, -ratio)
+                move2(i, op=self._ps2_mid_op(p, i, q, j, ratio), tol=tol)
+                self.eom.mean_fields[q, j] = self.eom._mean_field_with_node(p, i)
+                del self.eom.mean_fields[p, i]
             else:
                 move1(i, op=self._ps1_mid_op(p, i, q, j, None))
         return
 
     def _ps2_mid_op(self, p: Node, i: int, q: Node, j: int, ratio: float) -> Callable[[OptArray], OptArray]:
-        ord_p = self.state.frame.order(p)
-        ord_q = self.state.frame.order(q)
-        l_ops = [self.eom.mean_fields[p, _i] for _i in range(ord_p) if _i != i]
-        r_ops = [self.eom.mean_fields[q, _j] for _j in range(ord_q) if _j != j]
-        op_dict = dict(enumerate(l_ops + r_ops))
         expand = self.op.expand
         transforms = self.op.transforms
         reduce = self.op.reduce
 
         def _op(mid: OptArray) -> OptArray:
-            self.eom.mean_fields[q, j] =  self.eom._mean_field_with_node(p, i)
-            del self.eom.mean_fields[p, i]
+            ord_p = self.state.frame.order(p)
+            ord_q = self.state.frame.order(q)
+            l_ops = [self.eom.mean_fields[p, _i] for _i in range(ord_p) if _i != i]
+            r_ops = [self.eom.mean_fields[q, _j] for _j in range(ord_q) if _j != j]
+            op_dict = dict(enumerate(l_ops + r_ops))
 
-            _dd =  lambda a: reduce(transforms(expand(a), op_dict))
+            _dd = lambda a: reduce(transforms(expand(a), op_dict))
             return self._odeint(_dd, mid, ratio)
 
         return _op

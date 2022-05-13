@@ -41,13 +41,12 @@ class Model:
         assert array.ndim == order
 
         # Check confliction
-        for i in range(order):
+        for i, dim in enumerate(array.shape):
             for pair in [(p, i), self.frame.dual(p, i)]:
-                _dim = array.shape[i]
                 if pair in self._dims:
-                    assert self._dims[pair] == _dim
+                    assert self._dims[pair] == dim
                 else:
-                    self._dims[pair] = _dim
+                    self._dims[pair] = dim
 
         self._valuation[p] = optimize(array)
         return
@@ -61,6 +60,8 @@ class Model:
     def opt_update(self, p: Node, array: OptArray) -> None:
         assert p in self._valuation
         self._valuation[p] = array
+        self._dims.update({(p, i): dim for i, dim in enumerate(array.shape)})
+        return
 
     def fill_zeros(self, dims: Optional[dict[Tuple[Node, int], int]] = None, default_dim: int = 1) -> None:
         """
@@ -171,7 +172,8 @@ class CannonialModel(Model):
 
         n, j = self.frame.dual(m, i)
         dim = self._dims[(m, i)]
-        shape = self.shape(m).pop(i)
+        shape = self.shape(m)
+        shape.pop(i)
 
         mat_m = self[m].moveaxis(i, -1).reshape((-1, dim))
         q, mid = opt_qr(mat_m, rank, tol)
@@ -195,8 +197,10 @@ class CannonialModel(Model):
         assert i < self.frame.order(m)
 
         n, j = self.frame.dual(m, i)
-        shape_m = self.shape(m).pop(i)
-        shape_n = self.shape(n).pop(j)
+        shape_m = self.shape(m)
+        shape_m.pop(i)
+        shape_n = self.shape(n)
+        shape_n.pop(j)
 
         mid = opt_tensordot(self[m], self[n], ([i], [j]))
         if op is not None:

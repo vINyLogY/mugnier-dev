@@ -1,10 +1,6 @@
 # coding: utf-8
 
-from math import prod, inf
-from matplotlib.pyplot import step
-import numpy as np
-import torch
-from tqdm import tqdm, trange
+from tqdm import trange
 from mugnier.libs import backend
 from mugnier.libs.logging import Logger
 from mugnier.libs.quantity import Quantity as __
@@ -22,7 +18,7 @@ def test_hierachy():
     rdo = backend.array([[0.5, 0.5], [0.5, 0.5]])
 
     # Bath settings:
-    distr = BoseEinstein(n=3, beta=__(1 / 100_000, '/K').au)
+    distr = BoseEinstein(n=2, beta=__(1 / 300, '/K').au)
     corr = Drude(__(500, '/cm').au, __(50, '/cm').au, distr)
 
     # HEOM settings:
@@ -30,27 +26,15 @@ def test_hierachy():
     dims = [dim] * corr.k_max
     heom_op = Hierachy(h, op, corr, dims)
     s = ExtendedDensityTensor(rdo, dims)
-    solver = MasterEqn(heom_op, s)
-    solver.calculate()
-
-    # for n in solver.state.frame.node_visitor(start=s.root):
-
-    #     func = solver.node_eom(n)
-    #     diff_norm = np.linalg.norm(func(s[n]).cpu().numpy())
-    #     print(n, diff_norm)
-
-    # for (n, i), v in solver.mean_fields.items():
-    #     print(n, i, s.shape(n), v.shape)
-    # np.testing.assert_almost_equal(0.01611424664290165, diff_norm)
 
     # Propagator settings:
-    steps = 1000
-    interval = __(0.001, 'fs')
+    steps = 100
+    interval = __(0.01, 'fs')
 
-    logger1 = Logger(filename=f'naive_heom_{corr.k_max}({dim})-dt_{interval}-{backend.device}.log',
+    propagator = Propagator(heom_op, s, interval.au)
+    logger1 = Logger(filename=f'naive_heom_{corr.k_max}({dim})-{interval.value:.04f}fs-{backend.device}.log',
                      level='info').logger
     logger1.info('# time_(fs) rdo00 rdo01 rdo10 rdo11')
-    propagator = Propagator(heom_op, s, interval.au, ps_method=0)
     it = trange(steps)
     for n in it:
         propagator.step()
@@ -58,7 +42,7 @@ def test_hierachy():
         rdo = s.get_rdo()
         trace = rdo[0, 0] + rdo[1, 1]
         logger1.info(f'{_t} {rdo[0, 0]} {rdo[0, 1]} {rdo[1, 0]} {rdo[1, 1]}')
-        it.set_description(f'tr:{trace}')
+        it.set_description(f'Tr:{trace} | Coh:{abs(rdo[0, 1])}')
 
 
 if __name__ == '__main__':

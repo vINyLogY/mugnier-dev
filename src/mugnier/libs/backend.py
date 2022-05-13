@@ -7,16 +7,24 @@ import numpy as np
 import torch
 from numpy.typing import ArrayLike, NDArray
 import torchdiffeq
-import scipy.integrate
 
 # import opt_einsum as oe
 
+DOUBLE_PRECISION = True
+FORCE_CPU = False
 MAX_EINSUM_AXES = 52  # restrition from torch.einsum as of PyTorch 1.10
 PI = np.pi
+if DOUBLE_PRECISION:
+    ODE_TOL = 1.0e-12
+else:
+    ODE_TOL = 1.0e-6
 
 # CPU settings
 
-dtype = np.complex128
+if DOUBLE_PRECISION:
+    dtype = np.complex128
+else:
+    dtype = np.complex64
 Array = NDArray[dtype]
 
 
@@ -32,6 +40,10 @@ def zeros(shape: list[int]) -> Array:
     return np.zeros(shape, dtype=dtype)
 
 
+def zeros_like(shape: list[int]) -> Array:
+    return np.zeros_like(shape, dtype=dtype)
+
+
 def ones(shape: list[int]) -> Array:
     return np.ones(shape, dtype=dtype)
 
@@ -42,14 +54,17 @@ def eye(m: int, n: int, k: int = 0) -> Array:
 
 # GPU settings
 
-if torch.cuda.is_available():
+if FORCE_CPU:
+    device = 'cpu'
+elif torch.cuda.is_available():
     device = 'cuda'
 else:
     device = 'cpu'
 
-device = 'cpu'
-
-opt_dtype = torch.complex128
+if DOUBLE_PRECISION:
+    opt_dtype = torch.complex128
+else:
+    opt_dtype = torch.complex64
 OptArray = torch.Tensor
 
 
@@ -74,6 +89,9 @@ def opt_tensordot(a: OptArray, b: OptArray, axes: Tuple[list[int], list[int]]) -
     return torch.tensordot(a, b, dims=axes)
 
 
+
+
+
 @torch.no_grad()
 def opt_qr(a: OptArray, rank: Optional[int] = None, tol: Optional[float] = None) -> Tuple[OptArray, OptArray]:
     u, s, vh = torch.linalg.svd(a, full_matrices=False)
@@ -94,8 +112,9 @@ def opt_qr(a: OptArray, rank: Optional[int] = None, tol: Optional[float] = None)
         s = s[:rank]
         u = u[:, :rank]
         vh = vh[:rank, :]
+    ss = s.diag().to(opt_dtype)
 
-    return u, s.diag() @ vh
+    return u, ss @ vh
 
 
 @torch.no_grad()
@@ -122,5 +141,10 @@ def odeint(func: Callable[[OptArray], OptArray], y0: OptArray, dt: float, method
     _y0 = torch.stack([y0.real, y0.imag])
     _t = torch.tensor([0.0, dt], device=device)
     # y1 = torchdiffeq.odeint(_func, _y0, _t, method='scipy_solver', options={'solver': 'BDF'})
-    y1 = torchdiffeq.odeint(_func, _y0, _t, method=method, atol=1.0e-11)
+    y1 = torchdiffeq.odeint(_func, _y0, _t, method=method, atol=ODE_TOL)
     return (y1[1][0] + 1.0j * y1[1][1])
+
+
+# @torch.no_grad()
+# def opt_qr(a: OptArray, rank: Optional[int] = None, tol: Optional[float] = None) -> Tuple[OptArray, OptArray]:
+#     return torch.linalg.qr(a)

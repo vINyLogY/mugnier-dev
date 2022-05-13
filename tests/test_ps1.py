@@ -3,6 +3,7 @@
 from math import prod, inf
 from matplotlib.pyplot import step
 import numpy as np
+from sympy import root
 import torch
 from tqdm import tqdm, trange
 from mugnier.libs import backend
@@ -11,6 +12,7 @@ from mugnier.libs.quantity import Quantity as __
 from mugnier.heom.hierachy import ExtendedDensityTensor, Hierachy, TensorTrainEDT
 from mugnier.heom.bath import BoseEinstein, Drude
 from mugnier.operator.spo import MasterEqn, Propagator
+from mugnier.state.frame import End
 
 
 def test_hierachy():
@@ -22,42 +24,41 @@ def test_hierachy():
     rdo = backend.array([[0.5, 0.5], [0.5, 0.5]])
 
     # Bath settings:
-    distr = BoseEinstein(n=3, beta=__(1 / 100_000, '/K').au)
+    distr = BoseEinstein(n=3, beta=__(1 / 300, '/K').au)
     corr = Drude(__(500, '/cm').au, __(50, '/cm').au, distr)
 
     # HEOM settings:
     dim = 20
+    rank = 20
     dims = [dim] * corr.k_max
     heom_op = Hierachy(h, op, corr, dims)
-    s = TensorTrainEDT(rdo, dims, rank=19)
-    solver = MasterEqn(heom_op, s)
-    solver.calculate()
-
-    # for n in solver.state.frame.node_visitor(start=s.root):
-
-    #     func = solver.node_eom(n)
-    #     diff_norm = np.linalg.norm(func(s[n]).cpu().numpy())
-    #     print(n, diff_norm)
-
-    # for (n, i), v in solver.mean_fields.items():
-    #     print(n, i, s.shape(n), v.shape)
-    # np.testing.assert_almost_equal(0.01611424664290165, diff_norm)
+    s = TensorTrainEDT(rdo, dims, rank=rank)
 
     # Propagator settings:
     steps = 1000
-    interval = __(0.001, 'fs')
+    interval = __(0.01, 'fs')
+    ps_method = 1
 
-    logger1 = Logger(filename=f'ps1_heom_{corr.k_max}({dim})-dt_{interval}-{backend.device}.log', level='info').logger
+    propagator = Propagator(heom_op, s, interval.au, ps_method=ps_method)
+    logger1 = Logger(filename=f'ps{ps_method}_{corr.k_max}({dim})[{rank}]-dt_{interval}-{backend.device}.log',
+                     level='info').logger
     logger1.info('# time_(fs) rdo00 rdo01 rdo10 rdo11')
-    propagator = Propagator(heom_op, s, interval.au, ps_method=0)
     it = trange(steps)
     for n in it:
         propagator.step()
         _t = n * interval.value
         rdo = s.get_rdo()
         trace = rdo[0, 0] + rdo[1, 1]
+        rdo /= trace
         logger1.info(f'{_t} {rdo[0, 0]} {rdo[0, 1]} {rdo[1, 0]} {rdo[1, 1]}')
-        it.set_description(f'tr:{trace}')
+        s.opt_update(s.root, s[s.root] / trace)
+
+        rank = [
+            d for (p, i), d in s._dims.items()
+            if not isinstance(p, End) and not isinstance(s.frame.dual(p, i)[0], End)
+        ]
+        it.set_description(f'Tr:{trace} | Coh:{abs(rdo[0, 1])} | rank:{max(rank)}')
+
 
 
 if __name__ == '__main__':

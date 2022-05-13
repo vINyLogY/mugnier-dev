@@ -40,6 +40,10 @@ class ExtendedDensityTensor(CannonialModel):
         return array.reshape((dim, dim, -1))[:, :, 0]
 
 
+class MctdhEDT(CannonialModel):
+    pass
+
+
 class TensorTrainEDT(CannonialModel):
 
     def __init__(self, rdo: Array, dims: list[int], rank: int = 1) -> None:
@@ -49,21 +53,27 @@ class TensorTrainEDT(CannonialModel):
         ends = [_end(k) for k in range(len(dims))]
         f = Frame()
         dof = len(dims)
-        nodes = [Node('Elec')] + [Node(f'{i}') for i in range(dof)]
-        f.add_link(nodes[0], _end('i'))
-        f.add_link(nodes[0], _end('j'))
-        for n in range(dof):
-            f.add_link(nodes[n], nodes[n + 1])
-        for n, e in enumerate(ends):
-            f.add_link(nodes[n + 1], e)
+        e_node = Node('Elec')
+        p_nodes = [Node(f'{i}') for i in range(dof - 1)]
+        f.add_link(e_node, _end('i'))
+        f.add_link(e_node, _end('j'))
+        f.add_link(e_node, p_nodes[0])
+        if dof > 1:
+            for n in range(dof - 2):
+                f.add_link(p_nodes[n], p_nodes[n + 1])
+        for n in range(dof - 1):
+            f.add_link(p_nodes[n], ends[n])
+        f.add_link(p_nodes[-1], ends[-1])
 
-        super().__init__(f, nodes[0])
+        super().__init__(f, e_node)
 
         ext = zeros((rank,))
         ext[0] = 1.0
         array = np.tensordot(rdo, ext, axes=0)
         self[self.root] = array
         dim_dct = {f.dual(e, 0): dims[i] for i, e in enumerate(ends)}
+        # if rank > prod(shape):
+        #     dim_dct[e_node, 2] = prod(shape)
         self.fill_eyes(dims=dim_dct, default_dim=rank)
         return
 
@@ -71,6 +81,7 @@ class TensorTrainEDT(CannonialModel):
         array = self[self.root]
         dim = array.shape[0]
         return array.reshape((dim, dim, -1))[:, :, 0]
+
 
 class Hierachy(SumProdOp):
     scaling_factor = 1.0
