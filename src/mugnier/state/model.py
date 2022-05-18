@@ -1,5 +1,5 @@
 from math import prod
-from typing import Callable, Optional, Tuple
+from typing import Callable, Iterable, Optional, Tuple
 
 from mugnier.libs.backend import (Array, OptArray, array, eye, np, opt_qr, opt_tensordot, optimize, zeros)
 from mugnier.state.frame import End, Frame, Node, Point
@@ -20,6 +20,12 @@ class Model:
         self._dims = dict()  # type: dict[Tuple[Point, int], int]
         self._valuation = dict()  # type: dict[Node, OptArray]
         return
+
+    def __contains__(self, item):
+        return item in self.frame.nodes
+
+    def items(self):
+        return self._valuation.items()
 
     def shape(self, p: Point) -> list[Optional[int]]:
         assert p in self.frame.world

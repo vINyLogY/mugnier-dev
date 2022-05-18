@@ -18,7 +18,7 @@ A *restart* of `minimisTN`. Seperate graph-related algorithm and tensor operatio
     
     0. Create a python virtural environment with python vesion >= 3.10.
 
-    1. Prepare dependencies: `numpy`, `pytorch`.
+    1. Prepare dependencies: `numpy`, `pytorch`, `torchdiffeq`.
 
         (For Apple silicon, complie `numpy` locally to make use of `Accelerate` and AMX for best performace.)
 

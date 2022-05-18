@@ -40,8 +40,80 @@ class ExtendedDensityTensor(CannonialModel):
         return array.reshape((dim, dim, -1))[:, :, 0]
 
 
-class MctdhEDT(CannonialModel):
-    pass
+class Layer3EDT(CannonialModel):
+
+    def __init__(self, rdo: Array, dims: list[int], rank: int = 1) -> None:
+        shape = list(rdo.shape)
+        assert len(shape) == 2 and shape[0] == shape[1]
+
+        ends = [_end(k) for k in range(len(dims))]
+        f = Frame()
+        dof = len(dims)
+        e_node = Node('elec')
+        r_node = Node('root')
+
+        spf_nodes = [Node(f'{i}') for i in range(dof)]
+        f.add_link(e_node, _end('i'))
+        f.add_link(e_node, _end('j'))
+
+        f.add_link(e_node, r_node)
+        for n in range(dof):
+            f.add_link(r_node, spf_nodes[n])
+            f.add_link(spf_nodes[n], ends[n])
+
+        super().__init__(f, e_node)
+
+        _r = prod(rdo.shape)
+        ext = zeros((_r,))
+        ext[0] = 1.0
+        array = np.tensordot(rdo, ext, axes=0)
+        self[self.root] = array.reshape(list(rdo.shape) + [_r])
+        dim_dct = {f.dual(e, 0): dims[i] for i, e in enumerate(ends)}
+        dim_dct.update({(r_node, 0): _r})
+        # if rank > prod(shape):
+        #     dim_dct[e_node, 2] = prod(shape)
+        self.fill_eyes(dims=dim_dct, default_dim=rank)
+        return
+
+    def get_rdo(self) -> OptArray:
+        array = self[self.root]
+        dim = array.shape[0]
+        return array.reshape((dim, dim, -1))[:, :, 0]
+
+
+class Layer2EDT(CannonialModel):
+
+    def __init__(self, rdo: Array, dims: list[int], rank: int = 1) -> None:
+        shape = list(rdo.shape)
+        assert len(shape) == 2 and shape[0] == shape[1]
+
+        ends = [_end(k) for k in range(len(dims))]
+        f = Frame()
+        dof = len(dims)
+        r_node = Node('root')
+        spf_nodes = [Node(f'{i}') for i in range(dof)]
+        f.add_link(r_node, _end('i'))
+        f.add_link(r_node, _end('j'))
+        for n in range(dof):
+            f.add_link(r_node, spf_nodes[n])
+            f.add_link(spf_nodes[n], ends[n])
+
+        super().__init__(f, r_node)
+
+        ext = zeros((rank**dof,))
+        ext[0] = 1.0
+        array = np.tensordot(rdo, ext, axes=0)
+        self[self.root] = array.reshape(list(rdo.shape) + [rank] * dof)
+        dim_dct = {f.dual(e, 0): dims[i] for i, e in enumerate(ends)}
+        # if rank > prod(shape):
+        #     dim_dct[e_node, 2] = prod(shape)
+        self.fill_eyes(dims=dim_dct, default_dim=rank)
+        return
+
+    def get_rdo(self) -> OptArray:
+        array = self[self.root]
+        dim = array.shape[0]
+        return array.reshape((dim, dim, -1))[:, :, 0]
 
 
 class TensorTrainEDT(CannonialModel):

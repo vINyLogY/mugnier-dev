@@ -1,16 +1,18 @@
 # coding: utf-8
 
+from ast import Call
 from functools import cache
 from itertools import chain, count
+from math import prod
 from os import stat
 from turtle import shape
 from typing import Callable, Generator, Iterable, Optional, Tuple
 
 import numpy as np
-from torch import float_power
+from torch import float_power, tensor
 from mugnier.libs import backend
-from mugnier.libs.backend import (MAX_EINSUM_AXES, Array, OptArray, eye, odeint, opt_einsum, opt_sum, opt_tensordot,
-                                  optimize)
+from mugnier.libs.backend import (MAX_EINSUM_AXES, Array, OptArray, eye, odeint, opt_einsum, opt_eye_like, opt_sum, opt_tensordot,
+                                  optimize, opt_cat, opt_split)
 from mugnier.libs.utils import depths
 from mugnier.state.frame import End, Node, Point
 from mugnier.state.model import CannonialModel
@@ -111,6 +113,8 @@ class MasterEqn(object):
             p, i = dual(q, 0)
             self.mean_fields[(p, i)] = self.op[q]
         self._node_visitor = state.frame.node_visitor(start=state.root, method='BFS')
+        self._shape_list = [state.shape(p) for p in self._node_visitor]
+        self._size_list = [prod(s) for s in self._shape_list]
         return
 
     def calculate(self, for_all: bool = True) -> None:
@@ -119,6 +123,57 @@ class MasterEqn(object):
             self._get_mean_fields_type2()
             self._get_densities()
         return
+
+    def vectorize(self, tensors: list[OptArray]) -> OptArray:
+        return opt_cat([a.flatten() for a in tensors])
+
+    def vector_split(self, vec: OptArray) -> list[OptArray]:
+        tensors = opt_split(vec, self._size_list)
+        return [a.reshape(s) for a, s in zip(tensors, self._shape_list)]
+
+    def vector(self) -> OptArray:
+        return self.vectorize([self.state[p] for p in self._node_visitor])
+
+    def vector_update(self, vec: OptArray) -> None:
+        update = self.state.opt_update
+        for p, a in zip(self._node_visitor, self.vector_split(vec)):
+            update(p, a)
+        return
+
+    def vector_eom(self) -> Callable[[OptArray], OptArray]:
+        axes = self.state.axes
+        order_of = self.state.frame.order
+        expand = self.op.expand
+        transforms = self.op.transforms
+        reduce = self.op.reduce
+        trace = self.op.traces
+
+        def _dd(a: OptArray) -> OptArray:
+            ans_list = []
+            self.vector_update(a)
+            self.calculate(for_all=True)
+            for p, a in zip(self._node_visitor, self.vector_split(a)):
+                order = order_of(p)
+                op_list = {i: self.mean_fields[p, i] for i in range(order)}
+                assert a.ndim == order
+                ax = axes[p]
+                a = expand(a)
+                tmp = transforms(a, op_list)
+                if ax is not None:
+                    # Projection
+                    projection = transforms(a, {ax: trace(tmp, a.conj(), ax)})
+                    tmp -= projection
+                ans = reduce(tmp)
+                if ax is not None:
+                    # Inversion
+                    den = self.densities[p]
+                    # den += backend.ODE_TOL * opt_eye_like(den)
+                    ans = opt_tensordot(ans, den.pinverse(rcond=backend.ODE_TOL), ([ax], [1]))
+                    ans = ans.moveaxis(-1, ax)
+                ans_list.append(ans)
+            return self.vectorize(ans_list)
+
+        return _dd
 
     def node_eom(self, node: Node) -> Callable[[OptArray], OptArray]:
         ax = self.state.axes[node]
@@ -235,7 +290,7 @@ class Propagator:
                  state: CannonialModel,
                  dt: float,
                  ode_method: str = 'dopri5',
-                 ps_method: int = 0) -> None:
+                 ps_method: Optional[int] = 0) -> None:
 
         self.eom = MasterEqn(op, state)
         self.state = self.eom.state
@@ -255,7 +310,16 @@ class Propagator:
     def __iter__(self) -> Generator[float, None, None]:
         for i in range(self.max_steps):
             yield (self.dt * i)
-            self.step()
+            if self.ps_method is not None:
+                self.step()
+            else:
+                self.vectorized_step()
+        return
+
+    def vectorized_step(self) -> None:
+        y = self.eom.vector()
+        ans = self._odeint(self.eom.vector_eom(), y, 1.0)
+        self.eom.vector_update(ans)
         return
 
     def step(self) -> None:

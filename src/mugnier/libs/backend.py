@@ -69,6 +69,21 @@ OptArray = torch.Tensor
 
 
 @torch.no_grad()
+def opt_cat(tensors: list[OptArray]) -> OptArray:
+    return torch.cat(tensors)
+
+
+@torch.no_grad()
+def opt_eye_like(a: OptArray) -> OptArray:
+    m, n = a.shape
+    return torch.eye(m, n, device=device)
+
+
+@torch.no_grad()
+def opt_split(tensors: OptArray, size_list: list[int]) -> list[OptArray]:
+    return torch.split(tensors, size_list)
+
+@torch.no_grad()
 def optimize(array: ArrayLike) -> OptArray:
     ans = torch.tensor(array, dtype=opt_dtype, device=device)
     return ans

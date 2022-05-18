@@ -29,7 +29,7 @@ def test_hierachy():
 
     # HEOM settings:
     dim = 20
-    rank = 20
+    rank = 40
     dims = [dim] * corr.k_max
     heom_op = Hierachy(h, op, corr, dims)
     s = TensorTrainEDT(rdo, dims, rank=rank)
@@ -37,7 +37,7 @@ def test_hierachy():
     # Propagator settings:
     steps = 1000
     interval = __(0.01, 'fs')
-    ps_method = 1
+    ps_method = None
 
     propagator = Propagator(heom_op, s, interval.au, ps_method=ps_method)
     logger1 = Logger(filename=f'ps{ps_method}_{corr.k_max}({dim})[{rank}]-dt_{interval}-{backend.device}.log',
@@ -45,7 +45,7 @@ def test_hierachy():
     logger1.info('# time_(fs) rdo00 rdo01 rdo10 rdo11')
     it = trange(steps)
     for n in it:
-        propagator.step()
+        propagator.vectorized_step()
         _t = n * interval.value
         rdo = s.get_rdo()
         trace = rdo[0, 0] + rdo[1, 1]
@@ -58,7 +58,6 @@ def test_hierachy():
             if not isinstance(p, End) and not isinstance(s.frame.dual(p, i)[0], End)
         ]
         it.set_description(f'Tr:{trace} | Coh:{abs(rdo[0, 1])} | rank:{max(rank)}')
-
 
 
 if __name__ == '__main__':
