@@ -328,6 +328,38 @@ class MasterEqn(object):
                 self.mean_fields[(p, i)] = mf(q, j)
         return
 
+    def _get_fast_reg_mean_fields(self) -> None:
+        """From leaves to the root."""
+        axes = self.state.axes
+        dual = self.state.frame.dual
+
+        def regularize(p: Node, i: int) -> Tuple[OptArray, ...]:
+            order = self.state.frame.order(p)
+            shape = list(self.state.shape(p))
+            dim = shape.pop(i)
+            a = self.state[p]
+            u, s, v = opt_svd(a.moveaxis(i, -1).reshape((-1, dim)), tol=PINV_TOL)
+            a = self.op.expand(a)
+            u = self.op.expand(u.reshape(shape + [-1]).moveaxis(-1, i))
+            conj_a = a.conj()
+            conj_u = u.conj()
+            op_list = {_i: self.mean_fields[(p, _i)] for _i in range(order) if _i != i}
+            trans = self.op.transforms(a, op_list)
+            mf = self.op.traces(conj_a, trans, ax=i)
+            reg = self.op.traces(conj_u, trans, ax=i)
+            return mf, reg, s, v
+
+        for p in self._node_visitor:
+            i = axes[p]
+            if i is not None:
+                q, j = dual(p, i)
+                mf, reg, s, v = regularize(q, j)
+                self.mean_fields[(p, i)] = mf
+                self._reg[p] = reg
+                self._reg_s[p] = s
+                self._reg_v[p] = v
+        return
+
     def _get_reg_mean_fields(self) -> None:
         """From leaves to the root."""
         axes = self.state.axes

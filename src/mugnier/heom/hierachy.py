@@ -131,14 +131,12 @@ class TensorTrainEDT(CannonialModel):
         p_nodes = [Node(f'{i}') for i in range(dof - 1)]
         if p_nodes:
             f.add_link(e_node, p_nodes[0])
-
-            for n in range(dof - 1):
-                f.add_link(p_nodes[n], ends[n])
-            f.add_link(p_nodes[-1], ends[-1])
-
             if dof > 1:
                 for n in range(dof - 2):
                     f.add_link(p_nodes[n], p_nodes[n + 1])
+            for n in range(dof - 1):
+                f.add_link(p_nodes[n], ends[n])
+            f.add_link(p_nodes[-1], ends[-1])
         else:
             p_node = Node('0')
             f.add_link(e_node, p_node)

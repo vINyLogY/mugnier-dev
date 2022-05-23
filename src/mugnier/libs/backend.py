@@ -172,18 +172,22 @@ def odeint(func: Callable[[OptArray], OptArray], y0: OptArray, dt: float, method
         - `rk4` Fourth-order Runge-Kutta with 3/8 rule.
         - `explicit_adams` Explicit Adams.
         - `implicit_adams` Implicit Adams.
+    - Scipy compatable (slow):
+        - 'BDF'
     """
 
     def _func(_t, _y):
         """wrap a complex function to a 2D real function"""
-        # print('t_eval = ', _t)
+        # print('t_eval = ', _t.cpu().numpy())
         y = func(_y[0] + 1.0j * _y[1])
         return torch.stack([y.real, y.imag])
 
     _y0 = torch.stack([y0.real, y0.imag])
     _t = torch.tensor([0.0, dt], device=device)
-    # y1 = torchdiffeq.odeint(_func, _y0, _t, method='scipy_solver', options={'solver': 'BDF'})
-    y1 = torchdiffeq.odeint(_func, _y0, _t, method=method, atol=ODE_TOL)
+    if method == 'BDF':
+        y1 = torchdiffeq.odeint(_func, _y0, _t, method='scipy_solver', options={'solver': 'BDF'})
+    else:
+        y1 = torchdiffeq.odeint(_func, _y0, _t, method=method, atol=ODE_TOL)
     return (y1[1][0] + 1.0j * y1[1][1])
 
 
