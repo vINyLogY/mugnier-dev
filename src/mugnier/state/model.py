@@ -1,9 +1,39 @@
+from functools import reduce
 from math import prod
 from typing import Callable, Iterable, Optional, Tuple
 
 from mugnier.libs.backend import (Array, OptArray, array, eye, np, opt_qr, opt_tensordot, optimize, zeros)
 from mugnier.state.frame import End, Frame, Node, Point
 from mugnier.libs.utils import depths
+
+
+def triangular(n_list):
+    """A Generator yields the natural number in a triangular order.
+        """
+    length = len(n_list)
+    prod_list = [1]
+    for n in n_list:
+        prod_list.append(prod_list[-1] * n)
+    prod_list = prod_list
+
+    def key(case):
+        return sum(n * i for n, i in zip(prod_list, case))
+
+    combinations = {0: [[0] * length]}
+    for m in range(prod_list[-1]):
+        if m not in combinations:
+            permutation = [
+                case[:j] + [case[j] + 1] + case[j + 1:]
+                for case in combinations[m - 1]
+                for j in range(length)
+                if case[j] + 1 < n_list[j]
+            ]
+            combinations[m] = []
+            for case in permutation:
+                if case not in combinations[m]:
+                    combinations[m].append(case)
+        for case in combinations[m]:
+            yield key(case)
 
 
 class Model:
@@ -164,7 +194,16 @@ class CannonialModel(Model):
                 else:
                     _m = shape.pop(ax)
                     _n = prod(shape)
-                    ans = np.moveaxis(eye(_m, _n).reshape([_m] + shape), 0, ax)
+                    # Naive
+                    # ans = np.moveaxis(eye(_m, _n).reshape([_m] + shape), 0, ax)
+
+                    # Triangular
+                    ans = zeros([_m, _n])
+                    for n, v_i in zip(triangular(shape), ans):
+                        v_i[n] = 1.0
+                    ans = np.moveaxis(ans.reshape([_m] + shape), 0, ax)
+
+
                 self[p] = ans
         return
 

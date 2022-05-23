@@ -1,19 +1,13 @@
 # coding: utf-8
 
-from ast import Call
-from functools import cache
 from itertools import chain, count
 from math import prod
-from os import stat
-from turtle import shape
-from typing import Callable, Generator, Iterable, Optional, Tuple
+from typing import Callable, Generator, Iterable, Literal, Optional, Tuple
 
 import numpy as np
-from torch import float_power, tensor
 from mugnier.libs import backend
-from mugnier.libs.backend import (MAX_EINSUM_AXES, Array, OptArray, eye, odeint, opt_einsum, opt_eye_like, opt_sum, opt_tensordot,
-                                  optimize, opt_cat, opt_split)
-from mugnier.libs.utils import depths
+from mugnier.libs.backend import (MAX_EINSUM_AXES, PINV_TOL, Array, OptArray, eye, odeint, opt_einsum, opt_eye_like,
+                                  opt_pinv, opt_qr, opt_sum, opt_svd, opt_tensordot, optimize, opt_cat, opt_split)
 from mugnier.state.frame import End, Node, Point
 from mugnier.state.model import CannonialModel
 
@@ -74,12 +68,12 @@ class SumProdOp:
         ans_axes = [op_ax] + [order + ax_list.index(ax) if ax in ax_list else ax for ax in range(order)]
         args.append((ans_axes,))
 
-        ans = opt_einsum(*chain(*args))
+        args = list(chain(*args))
+        ans = opt_einsum(*args)
         return ans
 
     @staticmethod
     def traces(tensors1: OptArray, tensors2: OptArray, ax: int) -> OptArray:
-        assert tensors1.shape == tensors2.shape
         order = tensors1.ndim - 1
         assert ax < order
         assert order + 2 < MAX_EINSUM_AXES
@@ -99,6 +93,39 @@ class MasterEqn(object):
     r"""Solve the equation wrt Sum-of-Product operator:
         d/dt |state> = [op] |state>
     """
+    REG_TYPE = True  # type: Literal[1, 2]
+
+    @staticmethod
+    def transform(tensor: OptArray, op_dict: dict[int, OptArray]) -> OptArray:
+        order = tensor.ndim
+        n = len(op_dict)
+        assert order + n < MAX_EINSUM_AXES
+
+        ax_list = list(sorted(op_dict.keys(), key=(lambda ax: tensor.shape[ax])))
+        mat_list = [op_dict[ax] for ax in ax_list]
+
+        args = [(tensor, list(range(order)))]
+        args.extend((mat_list[i], [order + i, ax_list[i]]) for i in range(n))
+        ans_axes = [order + ax_list.index(ax) if ax in ax_list else ax for ax in range(order)]
+        args.append((ans_axes,))
+
+        ans = opt_einsum(*chain(*args))
+        return ans
+
+    @staticmethod
+    def trace(tensor1: OptArray, tensor2: OptArray, ax: int) -> OptArray:
+        order = tensor1.ndim
+        assert ax < order
+        assert order + 1 < MAX_EINSUM_AXES
+
+        i_ax = order
+        j_ax = order + 1
+
+        axes1 = list(range(order))
+        axes1[ax] = i_ax
+        axes2 = list(range(order))
+        axes2[ax] = j_ax
+        return opt_einsum(tensor1, axes1, tensor2, axes2, [i_ax, j_ax])
 
     def __init__(self, op: SumProdOp, state: CannonialModel) -> None:
         assert op.ends == state.ends
@@ -107,6 +134,11 @@ class MasterEqn(object):
 
         self.mean_fields = dict()  # type: dict[Tuple[Node, int], OptArray]
         self.densities = dict()  # type: dict[Node, OptArray]
+
+        # Temp for regularization
+        self._reg = dict()  # type: dict[Node, OptArray]
+        self._reg_s = dict()  # type: dict[Node, OptArray]
+        self._reg_v = dict()  # type: dict[Node, OptArray]
         # primitive
         dual = state.frame.dual
         for q in state.ends:
@@ -115,13 +147,6 @@ class MasterEqn(object):
         self._node_visitor = state.frame.node_visitor(start=state.root, method='BFS')
         self._shape_list = [state.shape(p) for p in self._node_visitor]
         self._size_list = [prod(s) for s in self._shape_list]
-        return
-
-    def calculate(self, for_all: bool = True) -> None:
-        self._get_mean_fields_type1()
-        if for_all:
-            self._get_mean_fields_type2()
-            self._get_densities()
         return
 
     def vectorize(self, tensors: list[OptArray]) -> OptArray:
@@ -140,36 +165,80 @@ class MasterEqn(object):
             update(p, a)
         return
 
+    def vector_reg_eom(self) -> Callable[[OptArray], OptArray]:
+        axes = self.state.axes
+        order_of = self.state.frame.order
+        expand = self.op.expand
+        transforms = self.op.transforms
+        reduce = self.op.reduce
+
+        transform = self.transform
+        trace = self.trace
+
+        def _dd(a: OptArray) -> OptArray:
+            ans_list = []
+            self.vector_update(a)
+            self._get_mean_fields_type1()
+            self._get_reg_mean_fields()
+            for p, a in zip(self._node_visitor, self.vector_split(a)):
+                order = order_of(p)
+                ax = axes[p]
+                assert a.ndim == order
+
+                op_list = {i: self.mean_fields[p, i] for i in range(order) if i != ax}
+                if ax is not None:
+                    op_list[ax] = self._reg[p]
+                ans = reduce(transforms(expand(a), op_list))
+
+                if ax is not None:
+                    # Projection
+                    projection = transform(a, {ax: trace(ans, a.conj(), ax)})
+                    ans -= projection
+                    # Inversion
+                    s = self._reg_s[p]
+                    v = self._reg_v[p]
+                    inv = v.H @ (1.0 / s).diag()
+                    ans = opt_tensordot(ans, inv, ([ax], [1]))
+                    ans = ans.moveaxis(-1, ax)
+
+                ans_list.append(ans)
+            return self.vectorize(ans_list)
+
+        return _dd
+
     def vector_eom(self) -> Callable[[OptArray], OptArray]:
         axes = self.state.axes
         order_of = self.state.frame.order
         expand = self.op.expand
         transforms = self.op.transforms
         reduce = self.op.reduce
-        trace = self.op.traces
+
+        transform = self.transform
+        trace = self.trace
 
         def _dd(a: OptArray) -> OptArray:
             ans_list = []
             self.vector_update(a)
-            self.calculate(for_all=True)
+            self._get_mean_fields_type1()
+            self._get_mean_fields_type2()
+            self._get_densities()
             for p, a in zip(self._node_visitor, self.vector_split(a)):
                 order = order_of(p)
-                op_list = {i: self.mean_fields[p, i] for i in range(order)}
-                assert a.ndim == order
                 ax = axes[p]
-                a = expand(a)
-                tmp = transforms(a, op_list)
+                assert a.ndim == order
+
+                op_list = {i: self.mean_fields[p, i] for i in range(order)}
+                ans = reduce(transforms(expand(a), op_list))
+
                 if ax is not None:
                     # Projection
-                    projection = transforms(a, {ax: trace(tmp, a.conj(), ax)})
-                    tmp -= projection
-                ans = reduce(tmp)
-                if ax is not None:
+                    projection = transform(a, {ax: trace(ans, a.conj(), ax)})
+                    ans -= projection
                     # Inversion
-                    den = self.densities[p]
-                    # den += backend.ODE_TOL * opt_eye_like(den)
-                    ans = opt_tensordot(ans, den.pinverse(rcond=backend.ODE_TOL), ([ax], [1]))
+                    inv = opt_pinv(self.densities[p])
+                    ans = opt_tensordot(ans, inv, ([ax], [1]))
                     ans = ans.moveaxis(-1, ax)
+
                 ans_list.append(ans)
             return self.vectorize(ans_list)
 
@@ -183,21 +252,21 @@ class MasterEqn(object):
         expand = self.op.expand
         transforms = self.op.transforms
         reduce = self.op.reduce
-        trace = self.op.traces
+
+        transform = self.transform
+        trace = self.trace
 
         def _dd(a: OptArray) -> OptArray:
             assert a.ndim == order
-            a = expand(a)
-            tmp = transforms(a, op_list)
+            ans = reduce(transforms(expand(a), op_list))
+
             if ax is not None:
                 # Projection
-                projection = transforms(a, {ax: trace(tmp, a.conj(), ax)})
-                tmp -= projection
-            ans = reduce(tmp)
-            if ax is not None:
+                projection = transform(a, {ax: trace(ans, a.conj(), ax)})
+                ans -= projection
                 # Inversion
                 den = self.densities[node]
-                ans = opt_tensordot(ans, den.pinverse(), ([ax], [1]))
+                ans = opt_tensordot(ans, opt_pinv(den), ([ax], [1]))
                 ans = ans.moveaxis(-1, ax)
             return ans
 
@@ -259,6 +328,42 @@ class MasterEqn(object):
                 self.mean_fields[(p, i)] = mf(q, j)
         return
 
+    def _get_reg_mean_fields(self) -> None:
+        """From leaves to the root."""
+        axes = self.state.axes
+        dual = self.state.frame.dual
+
+        def regularize(p: Node, i: int) -> Tuple[OptArray, ...]:
+            order = self.state.frame.order(p)
+            ax = axes[p]
+            _a = self.state[p]
+            if ax is not None:
+                sv = self._reg_s[p].diag() @ self._reg_v[p]
+                _a = self.transform(_a, {ax: sv})
+            shape = list(_a.shape)
+            dim = shape.pop(i)
+            u, s, v = opt_svd(_a.moveaxis(i, -1).reshape((-1, dim)), tol=PINV_TOL)
+            u = u.reshape(shape + [-1]).moveaxis(-1, i)
+
+            op_list = {_i: self.mean_fields[(p, _i)] for _i in range(order) if _i != i and _i != ax}
+            if ax is not None:
+                op_list[ax] = self._reg[p]
+
+            a = self.op.expand(self.state[p])
+            conj_u = self.op.expand(u.conj())
+            reg = self.op.traces(conj_u, self.op.transforms(a, op_list), ax=i)
+            return reg, s, v
+
+        for p in self._node_visitor:
+            i = axes[p]
+            if i is not None:
+                q, j = dual(p, i)
+                reg, s, v = regularize(q, j)
+                self._reg[p] = reg
+                self._reg_s[p] = s
+                self._reg_v[p] = v
+        return
+
     def _get_densities(self) -> None:
         state = self.state
         axes = state.axes
@@ -282,8 +387,8 @@ class MasterEqn(object):
 
 
 class Propagator:
-    tol = backend.ODE_TOL
     max_steps = 1_000_000_000
+    reg = True
 
     def __init__(self,
                  op: SumProdOp,
@@ -318,7 +423,12 @@ class Propagator:
 
     def vectorized_step(self) -> None:
         y = self.eom.vector()
-        ans = self._odeint(self.eom.vector_eom(), y, 1.0)
+
+        if self.reg:
+            ans = self._odeint(self.eom.vector_reg_eom(), y, 1.0)
+        else:
+            ans = self._odeint(self.eom.vector_eom(), y, 1.0)
+
         self.eom.vector_update(ans)
         return
 

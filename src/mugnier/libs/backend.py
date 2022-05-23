@@ -14,10 +14,14 @@ DOUBLE_PRECISION = True
 FORCE_CPU = False
 MAX_EINSUM_AXES = 52  # restrition from torch.einsum as of PyTorch 1.10
 PI = np.pi
+
+# Place to keep magic numbers
 if DOUBLE_PRECISION:
     ODE_TOL = 1.0e-12
+    PINV_TOL = 1.0e-12
 else:
     ODE_TOL = 1.0e-6
+    PINV_TOL = 1.0e-6
 
 # CPU settings
 
@@ -83,6 +87,7 @@ def opt_eye_like(a: OptArray) -> OptArray:
 def opt_split(tensors: OptArray, size_list: list[int]) -> list[OptArray]:
     return torch.split(tensors, size_list)
 
+
 @torch.no_grad()
 def optimize(array: ArrayLike) -> OptArray:
     ans = torch.tensor(array, dtype=opt_dtype, device=device)
@@ -102,9 +107,6 @@ def opt_sum(array: OptArray, dim: int) -> OptArray:
 @torch.no_grad()
 def opt_tensordot(a: OptArray, b: OptArray, axes: Tuple[list[int], list[int]]) -> OptArray:
     return torch.tensordot(a, b, dims=axes)
-
-
-
 
 
 @torch.no_grad()
@@ -133,6 +135,30 @@ def opt_qr(a: OptArray, rank: Optional[int] = None, tol: Optional[float] = None)
 
 
 @torch.no_grad()
+def opt_svd(a: OptArray, rank: Optional[int] = None, tol: Optional[float] = None) -> Tuple[OptArray, OptArray]:
+    u, s, vh = torch.linalg.svd(a, full_matrices=False)
+
+    # Calculate rank from atol
+    if tol is not None:
+        total_error = 0.0
+        for n, s_i in reversed(list(enumerate(s))):
+            total_error += s_i
+            if total_error > tol:
+                rank = n + 1
+                break
+        # default
+        if rank is None:
+            rank = 1
+
+    if rank is not None and rank <= len(s):
+        s = s[:rank]
+        u = u[:, :rank]
+        vh = vh[:rank, :]
+
+    return u, s.to(opt_dtype), vh
+
+
+@torch.no_grad()
 def odeint(func: Callable[[OptArray], OptArray], y0: OptArray, dt: float, method='dopri5'):
     """Avaliable method:
     - Adaptive-step:
@@ -150,6 +176,7 @@ def odeint(func: Callable[[OptArray], OptArray], y0: OptArray, dt: float, method
 
     def _func(_t, _y):
         """wrap a complex function to a 2D real function"""
+        # print('t_eval = ', _t)
         y = func(_y[0] + 1.0j * _y[1])
         return torch.stack([y.real, y.imag])
 
@@ -159,6 +186,22 @@ def odeint(func: Callable[[OptArray], OptArray], y0: OptArray, dt: float, method
     y1 = torchdiffeq.odeint(_func, _y0, _t, method=method, atol=ODE_TOL)
     return (y1[1][0] + 1.0j * y1[1][1])
 
+
+@torch.no_grad()
+def opt_pinv(a: OptArray) -> OptArray:
+    return torch.linalg.pinv(a, atol=PINV_TOL)
+
+
+@torch.no_grad()
+def inv(a):
+    return torch.linalg.inv
+
+
+# @torch.no_grad()
+# def opt_lstsq(a: OptArray, b: OptArray) -> OptArray:
+#     """Find the x s.t. ax =b"""
+#     ans = torch.linalg.lstsq(a.cpu(), b.cpu(), rcond=PINV_TOL)
+#     return ans.solution.to(device)
 
 # @torch.no_grad()
 # def opt_qr(a: OptArray, rank: Optional[int] = None, tol: Optional[float] = None) -> Tuple[OptArray, OptArray]:

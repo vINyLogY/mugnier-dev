@@ -1,11 +1,10 @@
 # coding: utf-8
 
-from math import prod, inf
-from matplotlib.pyplot import step
+from math import prod
+from turtle import back
 import numpy as np
-from sympy import root
 import torch
-from tqdm import tqdm, trange
+from tqdm import trange
 from mugnier.libs import backend
 from mugnier.libs.logging import Logger
 from mugnier.libs.quantity import Quantity as __
@@ -25,11 +24,12 @@ def test_hierachy():
 
     # Bath settings:
     distr = BoseEinstein(n=3, beta=__(1 / 300, '/K').au)
+    distr.decomposition_method = 'Matsubara'
     corr = Drude(__(500, '/cm').au, __(50, '/cm').au, distr)
 
     # HEOM settings:
-    dim = 200
-    rank = 40
+    dim = 20
+    rank = 2 * dim
     dims = [dim] * corr.k_max
     heom_op = Hierachy(h, op, corr, dims)
     s = TensorTrainEDT(rdo, dims, rank=rank)
@@ -38,11 +38,16 @@ def test_hierachy():
     steps = 1000
     interval = __(0.1, 'fs')
     ps_method = None
-    callback_steps = 10
+    ode_method = 'dopri5'
+    callback_steps = 1
+    reg = True
 
-    propagator = Propagator(heom_op, s, interval.au, ode_method='dopri8', ps_method=ps_method)
-    logger1 = Logger(filename=f'TT_ps{ps_method}_{corr.k_max}({dim})[{rank}]-dt_{interval}-{backend.device}.log',
-                     level='info').logger
+    propagator = Propagator(heom_op, s, interval.au, ode_method=ode_method, ps_method=ps_method)
+    propagator.reg = reg
+    fname = f'TT_{"reg" if reg else "pinv"}_ps{ps_method}_{corr.k_max}({dim})[{rank}]-dt_{interval}-{ode_method}-{backend.device}.log'
+    print(fname)
+    logger1 = Logger(filename=fname, level='info').logger
+    logger1.info(f'# ODE:{backend.ODE_TOL} | PINV:{backend.PINV_TOL}')
     logger1.info('# time_(fs) rdo00 rdo01 rdo10 rdo11')
     it = trange(steps)
     for n, _t in zip(it, propagator):
@@ -51,12 +56,7 @@ def test_hierachy():
         logger1.info(f'{_t} {rdo[0, 0]} {rdo[0, 1]} {rdo[1, 0]} {rdo[1, 1]}')
 
         if n % callback_steps == 0:
-            rank = [
-                d for (p, i), d in s._dims.items()
-                if not isinstance(p, End) and not isinstance(s.frame.dual(p, i)[0], End)
-            ]
-            vals = {p: torch.max(torch.abs(s[p])) for p in s.frame.nodes}
-            it.set_description(f'Tr:{trace} | Coh:{abs(rdo[0, 1])} | rank:{max(rank)} | mv:{max(vals.values())}')
+            it.set_description(f'Tr:{trace} | Coh:{abs(rdo[0, 1])}')
 
 
 if __name__ == '__main__':
