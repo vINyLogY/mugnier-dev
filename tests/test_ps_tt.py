@@ -1,9 +1,6 @@
 # coding: utf-8
 
 from math import prod
-from turtle import back
-import numpy as np
-import torch
 from tqdm import trange
 from mugnier.libs import backend
 from mugnier.libs.logging import Logger
@@ -14,7 +11,7 @@ from mugnier.operator.spo import MasterEqn, Propagator
 from mugnier.state.frame import End
 
 
-def test_hierachy():
+def test_hierachy(n: int = 1, dim: int = 20):
     # System settings:
     e = __(5000.0, '/cm').au
     v = __(0.0, '/cm').au
@@ -23,13 +20,12 @@ def test_hierachy():
     rdo = backend.array([[0.5, 0.5], [0.5, 0.5]])
 
     # Bath settings:
-    distr = BoseEinstein(n=3, beta=__(1 / 300, '/K').au)
+    distr = BoseEinstein(n=n, beta=__(1 / 300, '/K').au)
     distr.decomposition_method = 'Matsubara'
     corr = Drude(__(500, '/cm').au, __(50, '/cm').au, distr)
 
     # HEOM settings:
-    dim = 20
-    rank = 2 * dim
+    rank = 2 * dim if n != 0 else dim
     dims = [dim] * corr.k_max
     heom_op = Hierachy(h, op, corr, dims)
     s = TensorTrainEDT(rdo, dims, rank=rank)
@@ -40,14 +36,16 @@ def test_hierachy():
     ps_method = None
     ode_method = 'dopri5'
     callback_steps = 1
-    reg = True
+    reg_method = 'fast'
 
-    propagator = Propagator(heom_op, s, interval.au, ode_method=ode_method, ps_method=ps_method)
-    propagator.reg = reg
-    fname = f'TT_{"reg" if reg else "pinv"}_ps{ps_method}_{corr.k_max}({dim})[{rank}]-dt_{interval}-{ode_method}-{backend.device}.log'
-    print(fname)
+    propagator = Propagator(
+        heom_op, s, interval.au, ode_method=ode_method, ps_method=ps_method, reg_method=reg_method
+    )
+
+    fname = f'tt[debug3]-reg_{reg_method}-ps_{ps_method}-{corr.k_max}({dim})[{rank}]-{interval.value}fs-{ode_method}-{backend.device}.log'
+    print(f'Write in `{fname}`:')
     logger1 = Logger(filename=fname, level='info').logger
-    logger1.info(f'# ODE:{backend.ODE_TOL} | PINV:{backend.PINV_TOL}')
+    logger1.info(f'# ODE: {backend.ODE_RTOL}(+{backend.ODE_ATOL}) | PINV:{backend.PINV_TOL}')
     logger1.info('# time_(fs) rdo00 rdo01 rdo10 rdo11')
     it = trange(steps)
     for n, _t in zip(it, propagator):
@@ -56,7 +54,7 @@ def test_hierachy():
         logger1.info(f'{_t} {rdo[0, 0]} {rdo[0, 1]} {rdo[1, 0]} {rdo[1, 1]}')
 
         if n % callback_steps == 0:
-            it.set_description(f'Tr:{trace} | Coh:{abs(rdo[0, 1])}')
+            it.set_description(f'Tr:{trace.real:.4e}{trace.imag:+.4e}j | Coh:{abs(rdo[0, 1]):.8f}')
 
 
 if __name__ == '__main__':
@@ -65,4 +63,6 @@ if __name__ == '__main__':
     f_dir = os.path.abspath(os.path.dirname(__file__))
     os.chdir(f_dir)
 
-    test_hierachy()
+    for n in [3]:
+        for dim in [10]:
+            test_hierachy(n=n, dim = dim)

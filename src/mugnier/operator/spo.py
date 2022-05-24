@@ -6,8 +6,8 @@ from typing import Callable, Generator, Iterable, Literal, Optional, Tuple
 
 import numpy as np
 from mugnier.libs import backend
-from mugnier.libs.backend import (MAX_EINSUM_AXES, PINV_TOL, Array, OptArray, eye, odeint, opt_einsum, opt_eye_like,
-                                  opt_pinv, opt_qr, opt_sum, opt_svd, opt_tensordot, optimize, opt_cat, opt_split)
+from mugnier.libs.backend import (MAX_EINSUM_AXES, Array, OptArray, eye, odeint, opt_einsum, opt_eye_like, opt_pinv,
+                                  opt_qr, opt_sum, opt_svd, opt_tensordot, optimize, opt_cat, opt_split)
 from mugnier.state.frame import End, Node, Point
 from mugnier.state.model import CannonialModel
 
@@ -137,7 +137,7 @@ class MasterEqn(object):
 
         # Temp for regularization
         self._reg = dict()  # type: dict[Node, OptArray]
-        self._reg_s = dict()  # type: dict[Node, OptArray]
+        self._reg_sv = dict()  # type: dict[Node, OptArray]
         self._reg_v = dict()  # type: dict[Node, OptArray]
         # primitive
         dual = state.frame.dual
@@ -165,7 +165,7 @@ class MasterEqn(object):
             update(p, a)
         return
 
-    def vector_reg_eom(self) -> Callable[[OptArray], OptArray]:
+    def vector_reg_eom(self, fast: bool = False) -> Callable[[OptArray], OptArray]:
         axes = self.state.axes
         order_of = self.state.frame.order
         expand = self.op.expand
@@ -174,13 +174,20 @@ class MasterEqn(object):
 
         transform = self.transform
         trace = self.trace
+        update = self.vector_update
+        split = self.vector_split
+        vectorize = self.vectorize
+        visitor = self._node_visitor
+        get_mf = self._get_mean_fields_type1
+        get_reg = self._get_fast_reg_mean_fields if fast else self._get_reg_mean_fields
 
         def _dd(a: OptArray) -> OptArray:
             ans_list = []
-            self.vector_update(a)
-            self._get_mean_fields_type1()
-            self._get_reg_mean_fields()
-            for p, a in zip(self._node_visitor, self.vector_split(a)):
+            update(a)
+            get_mf()
+            get_reg()
+
+            for p, a in zip(visitor, split(a)):
                 order = order_of(p)
                 ax = axes[p]
                 assert a.ndim == order
@@ -189,20 +196,13 @@ class MasterEqn(object):
                 if ax is not None:
                     op_list[ax] = self._reg[p]
                 ans = reduce(transforms(expand(a), op_list))
-
                 if ax is not None:
                     # Projection
                     projection = transform(a, {ax: trace(ans, a.conj(), ax)})
                     ans -= projection
-                    # Inversion
-                    s = self._reg_s[p]
-                    v = self._reg_v[p]
-                    inv = v.H @ (1.0 / s).diag()
-                    ans = opt_tensordot(ans, inv, ([ax], [1]))
-                    ans = ans.moveaxis(-1, ax)
 
                 ans_list.append(ans)
-            return self.vectorize(ans_list)
+            return vectorize(ans_list)
 
         return _dd
 
@@ -231,13 +231,13 @@ class MasterEqn(object):
                 ans = reduce(transforms(expand(a), op_list))
 
                 if ax is not None:
-                    # Projection
-                    projection = transform(a, {ax: trace(ans, a.conj(), ax)})
-                    ans -= projection
                     # Inversion
                     inv = opt_pinv(self.densities[p])
                     ans = opt_tensordot(ans, inv, ([ax], [1]))
                     ans = ans.moveaxis(-1, ax)
+                    # Projection
+                    projection = transform(a, {ax: trace(ans, a.conj(), ax)})
+                    ans -= projection
 
                 ans_list.append(ans)
             return self.vectorize(ans_list)
@@ -261,13 +261,13 @@ class MasterEqn(object):
             ans = reduce(transforms(expand(a), op_list))
 
             if ax is not None:
-                # Projection
-                projection = transform(a, {ax: trace(ans, a.conj(), ax)})
-                ans -= projection
                 # Inversion
                 den = self.densities[node]
                 ans = opt_tensordot(ans, opt_pinv(den), ([ax], [1]))
                 ans = ans.moveaxis(-1, ax)
+                # Projection
+                projection = transform(a, {ax: trace(ans, a.conj(), ax)})
+                ans -= projection
             return ans
 
         return _dd
@@ -338,7 +338,7 @@ class MasterEqn(object):
             shape = list(self.state.shape(p))
             dim = shape.pop(i)
             a = self.state[p]
-            u, s, v = opt_svd(a.moveaxis(i, -1).reshape((-1, dim)), tol=PINV_TOL)
+            u, s, v = opt_svd(a.moveaxis(i, -1).reshape((-1, dim)))
             a = self.op.expand(a)
             u = self.op.expand(u.reshape(shape + [-1]).moveaxis(-1, i))
             conj_a = a.conj()
@@ -347,17 +347,16 @@ class MasterEqn(object):
             trans = self.op.transforms(a, op_list)
             mf = self.op.traces(conj_a, trans, ax=i)
             reg = self.op.traces(conj_u, trans, ax=i)
-            return mf, reg, s, v
+            reg = v.H @ (1.0 / s).diag() @ reg
+            return mf, reg
 
         for p in self._node_visitor:
             i = axes[p]
             if i is not None:
                 q, j = dual(p, i)
-                mf, reg, s, v = regularize(q, j)
+                mf, reg = regularize(q, j)
                 self.mean_fields[(p, i)] = mf
                 self._reg[p] = reg
-                self._reg_s[p] = s
-                self._reg_v[p] = v
         return
 
     def _get_reg_mean_fields(self) -> None:
@@ -370,11 +369,10 @@ class MasterEqn(object):
             ax = axes[p]
             _a = self.state[p]
             if ax is not None:
-                sv = self._reg_s[p].diag() @ self._reg_v[p]
-                _a = self.transform(_a, {ax: sv})
+                _a = self.transform(_a, {ax: self._reg_sv[p]})
             shape = list(_a.shape)
             dim = shape.pop(i)
-            u, s, v = opt_svd(_a.moveaxis(i, -1).reshape((-1, dim)), tol=PINV_TOL)
+            u, s, v = opt_svd(_a.moveaxis(i, -1).reshape((-1, dim)))
             u = u.reshape(shape + [-1]).moveaxis(-1, i)
 
             op_list = {_i: self.mean_fields[(p, _i)] for _i in range(order) if _i != i and _i != ax}
@@ -384,16 +382,17 @@ class MasterEqn(object):
             a = self.op.expand(self.state[p])
             conj_u = self.op.expand(u.conj())
             reg = self.op.traces(conj_u, self.op.transforms(a, op_list), ax=i)
-            return reg, s, v
+            reg = v.H @ (1.0 / s).diag() @ reg
+            sv = s.diag() @ v
+            return reg, sv
 
         for p in self._node_visitor:
             i = axes[p]
             if i is not None:
                 q, j = dual(p, i)
-                reg, s, v = regularize(q, j)
+                reg, sv = regularize(q, j)
                 self._reg[p] = reg
-                self._reg_s[p] = s
-                self._reg_v[p] = v
+                self._reg_sv[p] = sv
         return
 
     def _get_densities(self) -> None:
@@ -420,14 +419,14 @@ class MasterEqn(object):
 
 class Propagator:
     max_steps = 1_000_000_000
-    reg = True
 
     def __init__(self,
                  op: SumProdOp,
                  state: CannonialModel,
                  dt: float,
-                 ode_method: str = 'dopri5',
-                 ps_method: Optional[int] = 0) -> None:
+                 ode_method: Literal['bosh3', 'dopri5', 'dopri8'] = 'dopri5',
+                 reg_method: Literal['proper', 'fast', None] = 'proper',
+                 ps_method: Literal[0, 1, 2, None] = None) -> None:
 
         self.eom = MasterEqn(op, state)
         self.state = self.eom.state
@@ -436,6 +435,7 @@ class Propagator:
         self.dt = dt
         self.ode_method = ode_method
         self.ps_method = ps_method
+        self.reg_method = reg_method
 
         self._node_visitor = self.state.frame.node_visitor(self.state.root)
         self._node_link_visitor = self.state.frame.node_link_visitor(self.state.root)
@@ -447,21 +447,7 @@ class Propagator:
     def __iter__(self) -> Generator[float, None, None]:
         for i in range(self.max_steps):
             yield (self.dt * i)
-            if self.ps_method is not None:
-                self.step()
-            else:
-                self.vectorized_step()
-        return
-
-    def vectorized_step(self) -> None:
-        y = self.eom.vector()
-
-        if self.reg:
-            ans = self._odeint(self.eom.vector_reg_eom(), y, 1.0)
-        else:
-            ans = self._odeint(self.eom.vector_eom(), y, 1.0)
-
-        self.eom.vector_update(ans)
+            self.step()
         return
 
     def step(self) -> None:
@@ -478,7 +464,14 @@ class Propagator:
             self.ps2_forward_step(0.5)
             self.ps2_backward_step(0.5)
         else:
-            raise NotImplementedError
+            y = self.eom.vector()
+            if self.reg_method == 'fast':
+                ans = self._odeint(self.eom.vector_reg_eom(fast=True), y, 1.0)
+            elif self.reg_method == 'proper':
+                ans = self._odeint(self.eom.vector_reg_eom(fast=False), y, 1.0)
+            else:
+                ans = self._odeint(self.eom.vector_eom(), y, 1.0)
+            self.eom.vector_update(ans)
         return
 
     def _node_step(self, p: Node, ratio: float) -> None:

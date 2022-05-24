@@ -17,11 +17,13 @@ PI = np.pi
 
 # Place to keep magic numbers
 if DOUBLE_PRECISION:
-    ODE_TOL = 1.0e-12
+    ODE_RTOL = 0.0
+    ODE_ATOL = 1.0e-12
     PINV_TOL = 1.0e-12
 else:
-    ODE_TOL = 1.0e-6
-    PINV_TOL = 1.0e-6
+    ODE_RTOL = 0.0
+    ODE_ATOL = 1.0e-7
+    PINV_TOL = 1.0e-7
 
 # CPU settings
 
@@ -135,26 +137,10 @@ def opt_qr(a: OptArray, rank: Optional[int] = None, tol: Optional[float] = None)
 
 
 @torch.no_grad()
-def opt_svd(a: OptArray, rank: Optional[int] = None, tol: Optional[float] = None) -> Tuple[OptArray, OptArray]:
+def opt_svd(a: OptArray) -> Tuple[OptArray, OptArray]:
     u, s, vh = torch.linalg.svd(a, full_matrices=False)
-
-    # Calculate rank from atol
-    if tol is not None:
-        total_error = 0.0
-        for n, s_i in reversed(list(enumerate(s))):
-            total_error += s_i
-            if total_error > tol:
-                rank = n + 1
-                break
-        # default
-        if rank is None:
-            rank = 1
-
-    if rank is not None and rank <= len(s):
-        s = s[:rank]
-        u = u[:, :rank]
-        vh = vh[:rank, :]
-
+    reg = PINV_TOL * torch.ones_like(s)
+    s = torch.maximum(s, reg)
     return u, s.to(opt_dtype), vh
 
 
@@ -187,7 +173,7 @@ def odeint(func: Callable[[OptArray], OptArray], y0: OptArray, dt: float, method
     if method == 'BDF':
         y1 = torchdiffeq.odeint(_func, _y0, _t, method='scipy_solver', options={'solver': 'BDF'})
     else:
-        y1 = torchdiffeq.odeint(_func, _y0, _t, method=method, atol=ODE_TOL)
+        y1 = torchdiffeq.odeint(_func, _y0, _t, method=method, rtol=ODE_RTOL, atol=ODE_ATOL)
     return (y1[1][0] + 1.0j * y1[1][1])
 
 
