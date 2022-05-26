@@ -2,7 +2,8 @@
 """Generating the derivative of the total rho in SoP formalism.
 """
 
-from itertools import chain
+from inspect import trace
+from itertools import chain, pairwise
 from math import prod, sqrt
 from optparse import Option
 from typing import Optional, Tuple
@@ -11,7 +12,7 @@ from mugnier.basis.dvr import SineDVR
 from mugnier.heom.bath import Correlation, DiscreteVibration
 from mugnier.libs.backend import Array, OptArray, arange, eye, np, opt_einsum, opt_tensordot, optimize, zeros
 from mugnier.operator.spo import SumProdOp
-from mugnier.state.frame import End
+from mugnier.state.frame import End, Frame, Node
 from mugnier.state.model import CannonialModel
 from mugnier.state.template import Singleton
 
@@ -62,25 +63,41 @@ class TensorTrainDO(CannonialModel):
         assert len(shape) == 2 and shape[0] == shape[1]
         dof = len(dims)
 
-        ends = ([_end('i'), _end('j')] + [_end(f'i{k}') for k in range(dof)] + [_end(f'j{k}') for k in range(dof)])
-        f = Singleton(ends)
-        super().__init__(f, f.root)
-        self.system_size = shape[0]
-        self.bath_size = prod(dims)
-        if beta is None:
-            ext = zeros((prod(dims), prod(dims)))
-            ext[0, 0] = 1.0
-            array = np.tensordot(rdo, ext, axes=0).reshape(shape + dims + dims)
-        else:
-            array = rdo
-            for dim in dims:
-                d = [-beta * (n + 0.5) for n in range(dim)]
-                rb = np.exp(d)
-                rb = rb / np.sum(rb)
-                array = np.tensordot(array, np.diag(rb), axes=0)
-            array = array.reshape(shape + dims + dims)
-            array = np.moveaxis(array, [3 + 2 * n for n in range(dof)], [2 + dof + n for n in range(dof)])
-        self[self.root] = array
+        f = Frame()
+        e_node = Node(name='Elec')
+        train = [e_node]
+        f.add_link(e_node, _end('i'))
+        f.add_link(e_node, _end('j'))
+        p_ends = [_end(f'i{k}') for k in range(dof)] + [_end(f'j{k}') for k in range(dof)])
+        for k, (i, j) in enumerate((p_ends)):
+            i_node = Node(name=f'i{k}')
+            j_node = Node(name=f'j{k}')
+            f.add_link(train[-1], i_node)
+            f.add_link(i_node, i)
+            f.add_link(i_node, j_node)
+            f.add_link(j_node, j)
+            train.extend((i_node, j_node))
+
+        super().__init__(f, e_node)
+        self[self.root] = np.array(rdo)[:, :, np.newaxis]
+        length = len(train)
+        for n, (p, q) in enumerate(pairwise(train[1:])):
+            dim = dims[n]
+            d = [-beta * (n + 0.5) for n in range(dim)]
+            rb = np.exp(d)
+            rb = np.diag(np.sqrt(rb / np.sum(rb)))
+            self[p] = rb[np.newaxis, :, :]
+            if n != length:
+                self[q] = rb[:, :, np.newaxis]
+            else:
+                self[q] = rb
+
+        for _ in range(length - 1):
+            self.unite_split_move(2)
+        for _ in range(length - 1):
+            self.unite_split_move(0)
+
+
         return
 
     def get_rdo(self):

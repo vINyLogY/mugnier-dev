@@ -19,8 +19,8 @@ PI = np.pi
 
 # Place to keep magic numbers
 if DOUBLE_PRECISION:
-    ODE_RTOL = 1.0e-6
-    ODE_ATOL = 1.0e-8
+    ODE_RTOL = 1.0e-3
+    ODE_ATOL = 1.0e-6
     PINV_TOL = 1.0e-8
 else:
     ODE_RTOL = 1.0e-3
@@ -200,7 +200,9 @@ def odeint(func: Callable[[OptArray], OptArray], y0: OptArray, dt: float, method
     @count_calls
     def _func(_t, _y):
         """wrap a complex function to a 2D real function"""
-        # print('t_eval = ', _t.cpu().numpy())
+        #
+        #
+        print('t_eval = ', _t.cpu().numpy())
         y = func(_y[0] + 1.0j * _y[1])
         return torch.stack([y.real, y.imag])
 

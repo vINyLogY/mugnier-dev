@@ -100,7 +100,7 @@ class MasterEqn(object):
     def transform(tensor: OptArray, op_dict: dict[int, OptArray]) -> OptArray:
         order = tensor.ndim
         n = len(op_dict)
-        assert order + n < MAX_EINSUM_AXES
+        assert order + n - 1 < MAX_EINSUM_AXES
 
         ax_list = list(sorted(op_dict.keys(), key=(lambda ax: tensor.shape[ax])))
         # ax_list = list(sorted(op_dict.keys()))
