@@ -2,7 +2,7 @@ from functools import reduce
 from math import prod
 from typing import Callable, Iterable, Optional, Tuple
 
-from mugnier.libs.backend import (Array, OptArray, array, eye, np, opt_qr, opt_tensordot, optimize, zeros)
+from mugnier.libs.backend import (Array, OptArray, array, eye, np, opt_compressed_qr, opt_tensordot, optimize, zeros)
 from mugnier.state.frame import End, Frame, Node, Point
 from mugnier.libs.utils import depths
 
@@ -221,7 +221,7 @@ class CannonialModel(Model):
         shape.pop(i)
 
         mat_m = self[m].moveaxis(i, -1).reshape((-1, dim))
-        q, mid = opt_qr(mat_m, rank, tol)
+        q, mid = opt_compressed_qr(mat_m, rank, tol)
         array_m = q.reshape(shape + [-1]).moveaxis(-1, i)
         self.opt_update(m, array_m)
         self.root = n
@@ -251,7 +251,7 @@ class CannonialModel(Model):
         if op is not None:
             mid = op(mid)
 
-        q, r = opt_qr(mid.reshape((prod(shape_m), prod(shape_n))), rank, tol)
+        q, r = opt_compressed_qr(mid.reshape((prod(shape_m), prod(shape_n))), rank, tol)
         array_m = q.reshape(shape_m + [-1]).moveaxis(-1, i)
         self.opt_update(m, array_m)
         self.root = n

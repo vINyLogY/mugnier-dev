@@ -8,6 +8,8 @@ import torch
 from numpy.typing import ArrayLike, NDArray
 import torchdiffeq
 
+from mugnier.libs.utils import count_calls
+
 # import opt_einsum as oe
 
 DOUBLE_PRECISION = True
@@ -17,13 +19,13 @@ PI = np.pi
 
 # Place to keep magic numbers
 if DOUBLE_PRECISION:
-    ODE_RTOL = 0.0
-    ODE_ATOL = 1.0e-12
-    PINV_TOL = 1.0e-12
+    ODE_RTOL = 1.0e-6
+    ODE_ATOL = 1.0e-8
+    PINV_TOL = 1.0e-8
 else:
-    ODE_RTOL = 0.0
-    ODE_ATOL = 1.0e-7
-    PINV_TOL = 1.0e-7
+    ODE_RTOL = 1.0e-3
+    ODE_ATOL = 1.0e-6
+    PINV_TOL = 1.0e-6
 
 # CPU settings
 
@@ -112,7 +114,9 @@ def opt_tensordot(a: OptArray, b: OptArray, axes: Tuple[list[int], list[int]]) -
 
 
 @torch.no_grad()
-def opt_qr(a: OptArray, rank: Optional[int] = None, tol: Optional[float] = None) -> Tuple[OptArray, OptArray]:
+def opt_compressed_qr(a: OptArray,
+                      rank: Optional[int] = None,
+                      tol: Optional[float] = None) -> Tuple[OptArray, OptArray]:
     u, s, vh = torch.linalg.svd(a, full_matrices=False)
 
     # Calculate rank from atol
@@ -139,13 +143,44 @@ def opt_qr(a: OptArray, rank: Optional[int] = None, tol: Optional[float] = None)
 @torch.no_grad()
 def opt_svd(a: OptArray) -> Tuple[OptArray, OptArray]:
     u, s, vh = torch.linalg.svd(a, full_matrices=False)
+    # total_error = 0.0
+    # for n, s_i in enumerate(reversed(s)):
+    #     if total_error > PINV_TOL:
+    #         break
+    #     total_error += s_i
+    # reg = (PINV_TOL / n) * torch.ones_like(s)
     reg = PINV_TOL * torch.ones_like(s)
     s = torch.maximum(s, reg)
     return u, s.to(opt_dtype), vh
 
 
+# @torch.no_grad()
+# def opt_svd(a: OptArray) -> Tuple[OptArray, OptArray]:
+#     u, s, vh = torch.linalg.svd(a, full_matrices=False)
+#     total_error = 0.0
+#     rank = 1
+#     for n, s_i in reversed(list(enumerate(s))):
+#         total_error += s_i
+#         if total_error > PINV_TOL:
+#             rank = n + 1
+#             break
+#     s = s[:rank].to(opt_dtype)
+#     u = u[:, :rank]
+#     vh = vh[:rank, :]
+
+#     return u, s.to(opt_dtype), vh
+
+
 @torch.no_grad()
-def odeint(func: Callable[[OptArray], OptArray], y0: OptArray, dt: float, method='dopri5'):
+def opt_regularized_qr(a: OptArray) -> Tuple[OptArray, OptArray]:
+    q, r = torch.linalg.qr(a, mode='reduced')
+    reg = PINV_TOL * torch.eye(r.shape[0], r.shape[1], device=device, dtype=opt_dtype)
+    r = torch.where(torch.abs(r) > torch.abs(reg), r, reg)
+    return q, r
+
+
+@torch.no_grad()
+def odeint(func: Callable[[OptArray], OptArray], y0: OptArray, dt: float, method='dopri5') -> Tuple[OptArray, int]:
     """Avaliable method:
     - Adaptive-step:
         - `dopri8` Runge-Kutta 7(8) of Dormand-Prince-Shampine
@@ -162,6 +197,7 @@ def odeint(func: Callable[[OptArray], OptArray], y0: OptArray, dt: float, method
         - 'BDF'
     """
 
+    @count_calls
     def _func(_t, _y):
         """wrap a complex function to a 2D real function"""
         # print('t_eval = ', _t.cpu().numpy())
@@ -174,7 +210,7 @@ def odeint(func: Callable[[OptArray], OptArray], y0: OptArray, dt: float, method
         y1 = torchdiffeq.odeint(_func, _y0, _t, method='scipy_solver', options={'solver': 'BDF'})
     else:
         y1 = torchdiffeq.odeint(_func, _y0, _t, method=method, rtol=ODE_RTOL, atol=ODE_ATOL)
-    return (y1[1][0] + 1.0j * y1[1][1])
+    return (y1[1][0] + 1.0j * y1[1][1]), _func.calls
 
 
 @torch.no_grad()
@@ -183,8 +219,8 @@ def opt_pinv(a: OptArray) -> OptArray:
 
 
 @torch.no_grad()
-def inv(a):
-    return torch.linalg.inv
+def opt_inv(a: OptArray) -> OptArray:
+    return torch.linalg.inv(a)
 
 
 # @torch.no_grad()
@@ -192,7 +228,3 @@ def inv(a):
 #     """Find the x s.t. ax =b"""
 #     ans = torch.linalg.lstsq(a.cpu(), b.cpu(), rcond=PINV_TOL)
 #     return ans.solution.to(device)
-
-# @torch.no_grad()
-# def opt_qr(a: OptArray, rank: Optional[int] = None, tol: Optional[float] = None) -> Tuple[OptArray, OptArray]:
-#     return torch.linalg.qr(a)

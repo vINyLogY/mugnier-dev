@@ -5,7 +5,7 @@ from __future__ import annotations
 from builtins import map, zip
 from itertools import tee
 from operator import itemgetter
-from typing import (Callable, Generator, Iterable, Literal, Optional, Tuple, TypeVar)
+from typing import (Any, Callable, Generator, Iterable, Literal, Optional, Tuple, TypeVar)
 
 T = TypeVar('T')
 
@@ -24,6 +24,15 @@ def lazyproperty(func: Callable[..., T]) -> Callable[..., T]:
 
     return lazy
 
+
+def count_calls(f: Callable[..., T]) -> Callable[..., T]:
+
+    def wrapped(*args: ..., **kwargs: ...) -> T:
+        wrapped.calls += 1
+        return f(*args, **kwargs)
+
+    wrapped.calls = 0
+    return wrapped
 
 def iter_round_visitor(start: T, r: Callable[[T], list[T]]) -> Generator[Tuple[T, bool], None, None]:
     """Iterative round-trip visitor. Only support 'DFS' (depth first) method.

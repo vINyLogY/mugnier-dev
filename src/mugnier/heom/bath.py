@@ -101,6 +101,7 @@ class Correlation(object):
         self.coefficients = list()  # type: list[complex]
         self.conj_coefficents = list()  # type: list[complex]
         self.derivatives = list()  # type: list[complex]
+        self.closure = None
         return
 
     @property

@@ -7,7 +7,8 @@ from typing import Tuple
 from mugnier.basis.dvr import SineDVR
 
 from mugnier.heom.bath import Correlation
-from mugnier.libs.backend import Array, OptArray, arange, eye, np, opt_tensordot, optimize, zeros
+from mugnier.libs.backend import Array, OptArray, arange, eye, np, opt_tensordot, optimize, zeros, dtype
+from mugnier.libs.utils import huffman_tree
 from mugnier.operator.spo import SumProdOp
 from mugnier.state.frame import End, Frame, Node
 from mugnier.state.model import CannonialModel
@@ -70,8 +71,6 @@ class Layer3EDT(CannonialModel):
         self[self.root] = array.reshape(list(rdo.shape) + [_r])
         dim_dct = {f.dual(e, 0): dims[i] for i, e in enumerate(ends)}
         dim_dct.update({(r_node, 0): _r})
-        # if rank > prod(shape):
-        #     dim_dct[e_node, 2] = prod(shape)
         self.fill_eyes(dims=dim_dct, default_dim=rank)
         return
 
@@ -137,7 +136,6 @@ class TensorTrainEDT(CannonialModel):
                     f.add_link(p_nodes[n], p_nodes[n + 1])
             f.add_link(p_nodes[-1], ends[-1])
 
-
         else:
             p_node = Node('0')
             f.add_link(e_node, p_node)
@@ -145,13 +143,58 @@ class TensorTrainEDT(CannonialModel):
 
         super().__init__(f, e_node)
 
-        ext = zeros((rank,))
+        _size = rank  # if rank < prod(shape) else prod(shape)
+        ext = zeros((_size,))
         ext[0] = 1.0
         array = np.tensordot(rdo, ext, axes=0)
         self[self.root] = array
         dim_dct = {f.dual(e, 0): dims[i] for i, e in enumerate(ends)}
-        # if rank > prod(shape):
-        #     dim_dct[e_node, 2] = prod(shape)
+
+        self.fill_eyes(dims=dim_dct, default_dim=rank)
+        return
+
+    def get_rdo(self) -> OptArray:
+        array = self[self.root]
+        dim = array.shape[0]
+        return array.reshape((dim, dim, -1))[:, :, 0]
+
+
+class TensorTreeEDT(CannonialModel):
+
+    def __init__(self, rdo: Array, dims: list[int], n_ary=2, rank: int = 1) -> None:
+        shape = list(rdo.shape)
+        assert len(shape) == 2 and shape[0] == shape[1]
+
+        ends = [_end(k) for k in (range(len(dims)))]
+        f = Frame()
+        e_node = Node('Elec')
+        f.add_link(e_node, _end('i'))
+        f.add_link(e_node, _end('j'))
+
+        class new_node(Node):
+            _counter = 0
+
+            def __init__(self) -> None:
+                cls = type(self)
+                super().__init__(f'T{cls._counter}')
+                cls._counter += 1
+
+        importances = list(reversed(range(len(dims))))
+        graph, p_node = huffman_tree(ends, new_node, importances=importances, n_ary=n_ary)
+        f.add_link(e_node, p_node)
+        for n, children in graph.items():
+            for child in children:
+                f.add_link(n, child)
+
+        super().__init__(f, e_node)
+
+        _size = rank  # if rank < prod(shape) else prod(shape)
+        ext = zeros((_size,))
+        ext[0] = 1.0
+        array = np.tensordot(rdo, ext, axes=0)
+        self[self.root] = array
+        dim_dct = {f.dual(e, 0): dims[i] for i, e in enumerate(ends)}
+
         self.fill_eyes(dims=dim_dct, default_dim=rank)
         return
 
@@ -162,7 +205,8 @@ class TensorTrainEDT(CannonialModel):
 
 
 class Hierachy(SumProdOp):
-    scaling_factor = 1.0
+    # ?
+    scaling_factor = 2
 
     def __init__(self, sys_hamiltonian: Array, sys_op: Array, correlation: Correlation, dims: list[int]) -> None:
 
@@ -195,11 +239,9 @@ class Hierachy(SumProdOp):
             ck = self.coefficients[k]
             cck = self.conj_coefficents[k]
             dk = self.derivatives[k]
-            if self.scaling_factor is None:
-                fk = np.sqrt(np.real(ck + cck))
-            else:
-                fk = self.scaling_factor
-            # print(f'f_{k} = {fk}')
+            # fk = np.real(ck + cck) / 2.0
+            fk = self.scaling_factor
+            print(f'f_{k} = {fk}')
 
             opk = [
                 {
@@ -207,24 +249,34 @@ class Hierachy(SumProdOp):
                 },
                 {
                     _i: -1.0j * self.op,
-                    _k: ck / fk * self.raiser(k) + fk * self.lower(k)
+                    _k: (ck / fk * self.raiser(k) + fk * self.lower(k))
                 },
                 {
                     _j: 1.0j * self.op.conj(),
-                    _k: cck / fk * self.raiser(k) + fk * self.lower(k)
+                    _k: (cck / fk * self.raiser(k) + fk * self.lower(k))
                 },
             ]
             ans.extend(opk)
 
         return ans
 
+    # def raiser(self, k: int) -> Array:
+    #     dim = self.dims[k]
+    #     return eye(dim, dim, k=-1)
+
+    # def lower(self, k: int) -> Array:
+    #     dim = self.dims[k]
+    #     return np.diag(np.arange(1, dim, dtype=dtype), k=1)
+
     def raiser(self, k: int) -> Array:
         dim = self.dims[k]
-        return np.diag(np.sqrt(arange(dim))) @ eye(dim, dim, k=-1)
+        sub_diag = np.sqrt(np.arange(1, dim, dtype=dtype))
+        return np.diag(sub_diag, k=-1)
 
     def lower(self, k: int) -> Array:
         dim = self.dims[k]
-        return eye(dim, dim, k=1) @ np.diag(np.sqrt(arange(dim)))
+        sub_diag = np.sqrt(np.arange(1, dim, dtype=dtype))
+        return np.diag(sub_diag, k=1)
 
     def numberer(self, k: int) -> Array:
         dim = self.dims[k]
@@ -232,7 +284,6 @@ class Hierachy(SumProdOp):
 
 
 class SineExtendedDensityTensor(ExtendedDensityTensor):
-    scale_factor = 1.0
 
     def __init__(self, rdo: Array, spaces: list[Tuple[float, float, int]]) -> None:
         bases = [SineDVR(*args) for args in spaces]
