@@ -204,7 +204,7 @@ class MasterEqn(object):
                     if use_qr:
                         op_list[ax] = opt_inv(self._reg_r[p]) @ self._reg[p]
                     else:
-                        op_list[ax] = self._reg_v[p].H @ (1.0 / self._reg_s[p]).diag() @ self._reg[p]
+                        op_list[ax] = self._reg_v[p].mH @ (1.0 / self._reg_s[p]).diag() @ self._reg[p]
 
                 ans = reduce(transforms(expand(a), op_list))
                 if ax is not None:
@@ -265,7 +265,7 @@ class MasterEqn(object):
         op_list = {i: self.mean_fields[node, i] for i in range(order) if i != ax}
         if ax is not None:
             # Inversion
-            op_list[ax] = self._reg_v[node].H @ (1.0 / self._reg_s[node]).diag() @ self._reg[node]
+            op_list[ax] = self._reg_v[node].mH @ (1.0 / self._reg_s[node]).diag() @ self._reg[node]
 
         def _dd(a: OptArray) -> OptArray:
             assert a.ndim == order

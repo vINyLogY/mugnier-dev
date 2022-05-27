@@ -35,8 +35,8 @@ def test_hierachy(n: int = 1, dim: int = 20, rank: int = 20, decomposition_metho
     # HEOM settings:
     dims = [dim for _ in range(corr.k_max)]
     heom_op = Hierachy(h, op, corr, dims)
-    s = TensorTrainEDT(rdo, dims, rank=rank)
-    # s = TensorTreeEDT(rdo, dims, n_ary=2, rank=rank)
+    # s = TensorTrainEDT(rdo, dims, rank=rank)
+    s = TensorTreeEDT(rdo, dims, n_ary=2, rank=rank)
 
     # Propagator settings:
     callback_steps = 1
@@ -46,17 +46,17 @@ def test_hierachy(n: int = 1, dim: int = 20, rank: int = 20, decomposition_metho
     ode_method = 'dopri5'
 
     # reg_method = 'proper_qr'
-    reg_method = 'proper'
+    reg_method = 'fast'
 
     propagator = Propagator(heom_op, s, interval.au, ode_method=ode_method, ps_method=ps_method, reg_method=reg_method)
 
-    fname = f'tt_asym-{distr.decomposition_method}-{reg_method}-ps{ps_method}-{corr.k_max}({dim})[{rank}]-{ode_method}-reg{log10(backend.PINV_TOL):.0f}-{backend.device}.log'
+    fname = f'tt_sym1-{distr.decomposition_method}-{reg_method}-ps{ps_method}-{corr.k_max}({dim})[{rank}]-{ode_method}-reg{log10(backend.SVD_ATOL):.0f}-{backend.device}.log'
     print(s.shape(s.root))
     print(f'Write in `{fname}`:', file=sys.stderr)
     logger1 = Logger(filename=fname, level='info').logger
     logger1.info('# time rdo00 rdo01 rdo10 rdo11')
     logger2 = Logger(filename='metas_' + fname, level='info').logger
-    logger2.info(f'# ODE: {backend.ODE_RTOL}(+{backend.ODE_ATOL}) | PINV:{backend.PINV_TOL}')
+    logger2.info(f'# ODE: {backend.ODE_RTOL}(+{backend.ODE_ATOL}) | PINV:{backend.SVD_ATOL}')
     logger2.info('# time ODE_steps')
     it = trange(steps)
     for n, _t in zip(it, propagator):
@@ -73,7 +73,7 @@ def test_hierachy(n: int = 1, dim: int = 20, rank: int = 20, decomposition_metho
                 f'Tr:1{(trace.real - 1):+.4e}{trace.imag:+.4e}j | Coh:{coh:.8f} | ODE steps:{_steps}'
             )
             propagator.ode_step_counter = []
-            if coh > 0.55 or _steps > 1000:
+            if coh > 0.55 or _steps > 10000:
                 break
 
 
@@ -86,6 +86,6 @@ if __name__ == '__main__':
     #for i in [2, 3]:
     dim = 20
     rank = 40
-    for n in range(4, 7):
+    for n in range(3, 7):
         for method in ['Pade', 'Matsubara']:
             test_hierachy(n=n, dim=dim, rank=rank, decomposition_method=method)

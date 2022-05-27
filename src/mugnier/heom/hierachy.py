@@ -121,7 +121,7 @@ class TensorTrainEDT(CannonialModel):
         shape = list(rdo.shape)
         assert len(shape) == 2 and shape[0] == shape[1]
 
-        ends = [_end(k) for k in (range(len(dims)))]
+        ends = [_end(k) for k in range(len(dims))]
         f = Frame()
         dof = len(dims)
         e_node = Node('Elec')
@@ -260,23 +260,23 @@ class Hierachy(SumProdOp):
 
         return ans
 
-    def raiser(self, k: int) -> Array:
-        dim = self.dims[k]
-        return eye(dim, dim, k=-1)
-
-    def lower(self, k: int) -> Array:
-        dim = self.dims[k]
-        return np.diag(np.arange(1, dim, dtype=dtype), k=1)
-
     # def raiser(self, k: int) -> Array:
     #     dim = self.dims[k]
-    #     sub_diag = np.sqrt(np.arange(1, dim, dtype=dtype))
-    #     return np.diag(sub_diag, k=-1)
+    #     return eye(dim, dim, k=-1)
 
     # def lower(self, k: int) -> Array:
     #     dim = self.dims[k]
-    #     sub_diag = np.sqrt(np.arange(1, dim, dtype=dtype))
-    #     return np.diag(sub_diag, k=1)
+    #     return np.diag(np.arange(1, dim, dtype=dtype), k=1)
+
+    def raiser(self, k: int) -> Array:
+        dim = self.dims[k]
+        sub_diag = np.sqrt(np.arange(1, dim, dtype=dtype))
+        return np.diag(sub_diag, k=-1)
+
+    def lower(self, k: int) -> Array:
+        dim = self.dims[k]
+        sub_diag = np.sqrt(np.arange(1, dim, dtype=dtype))
+        return np.diag(sub_diag, k=1)
 
     def numberer(self, k: int) -> Array:
         dim = self.dims[k]

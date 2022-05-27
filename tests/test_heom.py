@@ -1,59 +1,83 @@
 # coding: utf-8
 
-import torch
+from math import log, log10, prod
+import sys
 from tqdm import trange
 from mugnier.libs import backend
 from mugnier.libs.logging import Logger
 from mugnier.libs.quantity import Quantity as __
-from mugnier.heom.hierachy import ExtendedDensityTensor, Hierachy, TensorTrainEDT
+from mugnier.heom.hierachy import ExtendedDensityTensor, Hierachy, TensorTrainEDT, TensorTreeEDT
 from mugnier.heom.bath import BoseEinstein, Drude
 from mugnier.operator.spo import MasterEqn, Propagator
 from mugnier.state.frame import End
 
+SCALE = 1 / __(5000.0, '/cm').au
+print('Elec. bias: ', SCALE)
 
-def test_hierachy():
+
+def test_hierachy(n: int = 1, dim: int = 20, rank: int = 20, decomposition_method: str = 'Matsubara'):
     # System settings:
-    e = __(5000.0, '/cm').au
-    v = __(0.0, '/cm').au
-    h = backend.array([[0, v], [v, e]])
+    e = __(5000.0 * SCALE, '/cm').au
+    v = __(0.0 * SCALE, '/cm').au
+    pop = 0.5
+    h = backend.array([[-pop * e, v], [v, (1.0 - pop) * e]])
     op = backend.array([[0.0, 0.0], [0.0, 1.0]])
     rdo = backend.array([[0.5, 0.5], [0.5, 0.5]])
+    print('Scaled Elec. H: ', h)
 
     # Bath settings:
-    distr = BoseEinstein(n=3, beta=__(1 / 300, '/K').au)
-    corr = Drude(__(500, '/cm').au, __(50, '/cm').au, distr)
+    distr = BoseEinstein(n=n, beta=__(1 / SCALE / 300, '/K').au)
+    distr.decomposition_method = decomposition_method
+    corr = Drude(__(SCALE * 200, '/cm').au, __(SCALE * 100, '/cm').au, distr)
+    corr.print()
+    print('Inv. Temp.: ', distr.beta)
 
     # HEOM settings:
-    dim = 20
-    dims = [dim] * corr.k_max
+    dims = [dim for _ in range(corr.k_max)]
     heom_op = Hierachy(h, op, corr, dims)
-    s = ExtendedDensityTensor(rdo, dims)
+    # s = ExtendedDensityTensor(rdo, dims)
+    # s = TensorTrainEDT(rdo, dims, rank=rank)
+    s = TensorTreeEDT(rdo, dims, n_ary=2, rank=rank)
+    print(s.axes)
 
     # Propagator settings:
-    steps = 1000
-    interval = __(0.1, 'fs')
     callback_steps = 1
+    steps = 1000 * callback_steps
+    interval = __(0.1 / SCALE / callback_steps, 'fs')
+    ps_method = None
+    ode_method = 'dopri5'
 
-    propagator = Propagator(heom_op, s, interval.au, ps_method=None)
-    logger1 = Logger(filename=f'HEOM_{corr.k_max}({dim})-{interval.value:.04f}fs-{backend.device}.log',
-                     level='info').logger
-    logger2 = Logger(filename=f'HEOM_{corr.k_max}({dim})_traces.log', level='info').logger
-    logger1.info('# time_(fs) rdo00 rdo01 rdo10 rdo11')
+    # reg_method = 'proper_qr'
+    reg_method = 'proper'
+
+    propagator = Propagator(heom_op, s, interval.au, ode_method=ode_method, ps_method=ps_method, reg_method=reg_method)
+
+    fname = (
+        f'{type(s).__name__}-{distr.decomposition_method}-{reg_method}-ps{ps_method}-{corr.k_max}({dim})[{rank}]' +
+        f'-{ode_method}-[{log10(backend.ODE_RTOL):+.0f}({log10(backend.ODE_ATOL):+.0f}){log10(backend.SVD_ATOL):+.0f}])' +
+        f'-{backend.device}.log')
+    print(f'Write in `{fname}`:', file=sys.stderr)
+    logger1 = Logger(filename=fname, level='info').logger
+    logger1.info('# time rdo00 rdo01 rdo10 rdo11')
+    logger2 = Logger(filename='metas_' + fname, level='info').logger
+    logger2.info(f'# ODE: {backend.ODE_RTOL}(+{backend.ODE_ATOL}) | PINV:{backend.SVD_ATOL}')
+    logger2.info('# time ODE_steps')
     it = trange(steps)
-
     for n, _t in zip(it, propagator):
         rdo = s.get_rdo()
+        t = _t * SCALE
         trace = rdo[0, 0] + rdo[1, 1]
-        logger1.info(f'{_t} {rdo[0, 0]} {rdo[0, 1]} {rdo[1, 0]} {rdo[1, 1]}')
-
-        edt = s[s.root].reshape(2, 2, -1)
-        nm = torch.log(torch.sum(torch.abs(edt), dim=(0, 1))[:100])
-        msg = f'{_t}    ' + ' '.join(f'{tr}' for tr in nm)
-        logger2.info(msg)
+        logger1.info(f'{t} {rdo[0, 0]} {rdo[0, 1]} {rdo[1, 0]} {rdo[1, 1]}')
+        logger2.info(f'{t} {propagator.ode_step_counter[-1]}')
 
         if n % callback_steps == 0:
-            vals = {p: torch.max(torch.abs(s[p])) for p in s.frame.nodes}
-            it.set_description(f'Tr:{trace} | Coh:{abs(rdo[0, 1])} | mv:{max(vals.values())}')
+            coh = abs(rdo[0, 1])
+            _steps = sum(propagator.ode_step_counter)
+
+            it.set_description(f'Tr:1{(trace.real - 1):+.4e}{trace.imag:+.4e}j | Coh:{coh:.8f} | ODE steps:{_steps}')
+            propagator.ode_step_counter = []
+            if coh > 0.55:
+                break
 
 
 if __name__ == '__main__':
@@ -62,4 +86,11 @@ if __name__ == '__main__':
     f_dir = os.path.abspath(os.path.dirname(__file__))
     os.chdir(f_dir)
 
-    test_hierachy()
+    dim = 20
+    rank = 40
+    for n in range(4, 9):
+        for method in ['Pade', 'Matsubara']:
+            try:
+                test_hierachy(n=n, dim=dim, rank=rank, decomposition_method=method)
+            except RuntimeError:
+                continue

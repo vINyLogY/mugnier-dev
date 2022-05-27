@@ -20,12 +20,12 @@ PI = np.pi
 # Place to keep magic numbers
 if DOUBLE_PRECISION:
     ODE_RTOL = 1.0e-3
-    ODE_ATOL = 1.0e-6
-    PINV_TOL = 1.0e-8
+    ODE_ATOL = 1.0e-8
+    SVD_ATOL = 1.0e-8
 else:
     ODE_RTOL = 1.0e-3
     ODE_ATOL = 1.0e-6
-    PINV_TOL = 1.0e-6
+    SVD_ATOL = 1.0e-6
 
 # CPU settings
 
@@ -143,14 +143,22 @@ def opt_compressed_qr(a: OptArray,
 @torch.no_grad()
 def opt_svd(a: OptArray) -> Tuple[OptArray, OptArray]:
     u, s, vh = torch.linalg.svd(a, full_matrices=False)
-    # total_error = 0.0
-    # for n, s_i in enumerate(reversed(s)):
-    #     if total_error > PINV_TOL:
+    # error = 0.0
+    # l = len(s)
+    # n = l
+    # for s_i in reversed(s):
+    #     n -= 1
+    #     error += s_i
+    #     if error > PINV_TOL:
     #         break
-    #     total_error += s_i
-    # reg = (PINV_TOL / n) * torch.ones_like(s)
-    reg = PINV_TOL * torch.ones_like(s)
+    # tail = l - n - 1
+    # if tail > 0:
+    #     s[n] -= PINV_TOL
+    #     s[n + 1:] += PINV_TOL / tail
+    reg = SVD_ATOL * torch.ones_like(s)
     s = torch.maximum(s, reg)
+    s /= torch.sum(s)
+    # print(s)
     return u, s.to(opt_dtype), vh
 
 
@@ -174,7 +182,7 @@ def opt_svd(a: OptArray) -> Tuple[OptArray, OptArray]:
 @torch.no_grad()
 def opt_regularized_qr(a: OptArray) -> Tuple[OptArray, OptArray]:
     q, r = torch.linalg.qr(a, mode='reduced')
-    reg = PINV_TOL * torch.eye(r.shape[0], r.shape[1], device=device, dtype=opt_dtype)
+    reg = SVD_ATOL * torch.eye(r.shape[0], r.shape[1], device=device, dtype=opt_dtype)
     r = torch.where(torch.abs(r) > torch.abs(reg), r, reg)
     return q, r
 
@@ -200,9 +208,7 @@ def odeint(func: Callable[[OptArray], OptArray], y0: OptArray, dt: float, method
     @count_calls
     def _func(_t, _y):
         """wrap a complex function to a 2D real function"""
-        #
-        #
-        print('t_eval = ', _t.cpu().numpy())
+        # print('t_eval = ', _t.cpu().numpy())
         y = func(_y[0] + 1.0j * _y[1])
         return torch.stack([y.real, y.imag])
 
@@ -217,7 +223,7 @@ def odeint(func: Callable[[OptArray], OptArray], y0: OptArray, dt: float, method
 
 @torch.no_grad()
 def opt_pinv(a: OptArray) -> OptArray:
-    return torch.linalg.pinv(a, atol=PINV_TOL)
+    return torch.linalg.pinv(a, atol=SVD_ATOL)
 
 
 @torch.no_grad()
