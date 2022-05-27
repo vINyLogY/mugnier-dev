@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from builtins import map, zip
+from collections import OrderedDict
 from itertools import tee
 from operator import itemgetter
 from typing import (Any, Callable, Generator, Iterable, Literal, Optional, Tuple, TypeVar)
@@ -117,7 +118,7 @@ def path(start: T, stop: T, r: Callable[[T], list[T]]) -> list[T]:
 def huffman_tree(sources: list[T],
                  new_obj: Callable[[], T],
                  importances: Optional[list[int]] = None,
-                 n_ary: int = 2) -> Tuple[dict[T, list[T]], T]:
+                 n_ary: int = 2) -> Tuple[OrderedDict[T, list[T]], T]:
     """Generate a Tree for the soureces as leaves using Huffman coding method.
     """
     if importances is None:
@@ -130,7 +131,7 @@ def huffman_tree(sources: list[T],
         return x[1]
 
     sequence = list(zip(sources, importances))
-    graph = dict()
+    graph = OrderedDict()
     while len(sequence) > 1:
         sequence.sort(key=snd)
         try:
@@ -141,7 +142,7 @@ def huffman_tree(sources: list[T],
         new = new_obj()
         graph[new] = list(map(fst, branch))
         sequence.insert(0, (new, p))
-    return graph, fst(sequence[0])
+    return OrderedDict(reversed(graph.items())), fst(sequence[0])
 
 
 def unzip(iterable: Iterable) -> Iterable[Iterable]:
