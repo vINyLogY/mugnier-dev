@@ -40,7 +40,7 @@ def test_hierachy(dof=4, n_ltc: int = 1, dim: int = 20, rank: int = 20):
             __(SCALE * freq, '/cm').au,
             __(SCALE * 10, '/cm').au, distr)
         bosons.append(b)
-    for k in range(n_ltc+1):
+    for k in range(n_ltc + 1):
         for b in bosons:
             corr.coefficients.append(b.coefficients[k])
             corr.conj_coefficents.append(b.conj_coefficents[k])
@@ -51,8 +51,8 @@ def test_hierachy(dof=4, n_ltc: int = 1, dim: int = 20, rank: int = 20):
     # HEOM settings:
     dims = [dim for _ in range(corr.k_max)]
     heom_op = Hierachy(h, op, corr, dims)
-    s = TensorTrainEDT(rdo, dims, rank=rank)
-    # s = TensorTreeEDT(rdo, dims, n_ary=2, rank=rank)
+    # s = TensorTrainEDT(rdo, dims, rank=rank)
+    s = TensorTreeEDT(rdo, dims, n_ary=2, rank=rank)
 
     # Propagator settings:
     callback_steps = 1
@@ -67,9 +67,10 @@ def test_hierachy(dof=4, n_ltc: int = 1, dim: int = 20, rank: int = 20):
     propagator = Propagator(heom_op, s, interval.au, ode_method=ode_method, ps_method=ps_method, reg_method=reg_method)
 
     fname = (
-        f'tt-brownian-{distr.decomposition_method}-{reg_method}-ps{ps_method}-{dof}x{n_ltc+1}({dim})[{rank}]' +
-        f'-{ode_method}-[{log10(backend.ODE_RTOL):+.0f}({log10(backend.ODE_ATOL):+.0f}){log10(backend.SVD_ATOL):+.0f}])' +
-        f'-{backend.device}.log')
+        f'brownian-{type(s).__name__}-{distr.decomposition_method}-{reg_method}-ps{ps_method}-{dof}x{n_ltc+1}({dim})[{rank}]'
+        +
+        f'-{ode_method}-[{log10(backend.ODE_RTOL):+.0f}({log10(backend.ODE_ATOL):+.0f}){log10(backend.SVD_ATOL):+.0f}])'
+        + f'-{backend.device}.log')
     print(s.shape(s.root))
     print(f'Write in `{fname}`:', file=sys.stderr)
     logger1 = Logger(filename=fname, level='info').logger
@@ -98,9 +99,9 @@ if __name__ == '__main__':
     import os
 
     f_dir = os.path.abspath(os.path.dirname(__file__))
-    os.chdir(os.path.join(f_dir, 'data'))
+    os.chdir(os.path.join(f_dir, 'brownian_data'))
 
     #for i in [2, 3]:
-    dim = 20
-    rank = 40
-    test_hierachy(dof=2, n_ltc=3, dim=dim, rank=rank)
+    dim = 10
+    rank = 20
+    test_hierachy(dof=4, n_ltc=3, dim=dim, rank=rank)

@@ -88,7 +88,7 @@ if __name__ == '__main__':
 
     dim = 20
     rank = 40
-    for n in range(4, 9):
+    for n in range(6, 9):
         for method in ['Pade', 'Matsubara']:
             try:
                 test_hierachy(n=n, dim=dim, rank=rank, decomposition_method=method)

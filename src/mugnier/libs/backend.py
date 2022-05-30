@@ -19,7 +19,7 @@ PI = np.pi
 
 # Place to keep magic numbers
 if DOUBLE_PRECISION:
-    ODE_RTOL = 1.0e-3
+    ODE_RTOL = 1.0e-6
     ODE_ATOL = 1.0e-8
     SVD_ATOL = 1.0e-8
 else:

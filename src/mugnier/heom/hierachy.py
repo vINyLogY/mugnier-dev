@@ -241,7 +241,7 @@ class Hierachy(SumProdOp):
             dk = self.derivatives[k]
             # fk = np.real(ck + cck) / 2.0
             fk = self.scaling_factor
-            print(f'f_{k} = {fk}')
+            # print(f'f_{k} = {fk}')
 
             opk = [
                 {
