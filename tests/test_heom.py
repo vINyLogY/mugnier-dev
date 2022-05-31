@@ -15,7 +15,13 @@ SCALE = 1 / __(5000.0, '/cm').au
 print('Elec. bias: ', SCALE)
 
 
-def test_hierachy(n: int = 1, dim: int = 20, rank: int = 20, decomposition_method: str = 'Matsubara'):
+def test_hierachy(
+    n: int = 1,
+    dim: int = 20,
+    rank: int = 20,
+    decomposition_method: str = 'Matsubara',
+    htd_method: str = 'Train',
+):
     # System settings:
     e = __(5000.0 * SCALE, '/cm').au
     v = __(0.0 * SCALE, '/cm').au
@@ -35,25 +41,33 @@ def test_hierachy(n: int = 1, dim: int = 20, rank: int = 20, decomposition_metho
     # HEOM settings:
     dims = [dim for _ in range(corr.k_max)]
     heom_op = Hierachy(h, op, corr, dims)
-    # s = ExtendedDensityTensor(rdo, dims)
-    # s = TensorTrainEDT(rdo, dims, rank=rank)
-    s = TensorTreeEDT(rdo, dims, n_ary=2, rank=rank)
+    if htd_method == 'Train':
+        s = TensorTrainEDT(rdo, dims, rank=rank)
+    elif htd_method == 'RevTrain':
+        s = TensorTrainEDT(rdo, dims, rank=rank, rev=False)
+    elif htd_method == 'Tree2':
+        s = TensorTreeEDT(rdo, dims, n_ary=2, rank=rank)
+    elif htd_method == 'Tree3':
+        s = TensorTreeEDT(rdo, dims, n_ary=3, rank=rank)
+    else:
+        s = ExtendedDensityTensor(rdo, dims)
+
     print(s.axes)
 
     # Propagator settings:
     callback_steps = 1
-    steps = 1000 * callback_steps
+    steps = 10000 * callback_steps
     interval = __(0.1 / SCALE / callback_steps, 'fs')
     ps_method = None
     ode_method = 'dopri5'
 
     # reg_method = 'proper_qr'
-    reg_method = 'proper'
+    reg_method = 'fast'
 
     propagator = Propagator(heom_op, s, interval.au, ode_method=ode_method, ps_method=ps_method, reg_method=reg_method)
 
     fname = (
-        f'{type(s).__name__}-{distr.decomposition_method}-{reg_method}-ps{ps_method}-{corr.k_max}({dim})[{rank}]' +
+        f'{htd_method}-{distr.decomposition_method}-{reg_method}-ps{ps_method}-{corr.k_max}({dim})[{rank}]' +
         f'-{ode_method}-[{log10(backend.ODE_RTOL):+.0f}({log10(backend.ODE_ATOL):+.0f}){log10(backend.SVD_ATOL):+.0f}])' +
         f'-{backend.device}.log')
     print(f'Write in `{fname}`:', file=sys.stderr)
@@ -88,9 +102,10 @@ if __name__ == '__main__':
 
     dim = 20
     rank = 40
-    for n in range(6, 9):
-        for method in ['Pade', 'Matsubara']:
+    method = 'Matsubara'
+    for n in [3, 4]:
+        for htd in ['Train', 'RevTrain', 'HEOM']:
             try:
-                test_hierachy(n=n, dim=dim, rank=rank, decomposition_method=method)
+                test_hierachy(n=n, dim=dim, rank=rank, decomposition_method=method, htd_method=htd)
             except RuntimeError:
                 continue

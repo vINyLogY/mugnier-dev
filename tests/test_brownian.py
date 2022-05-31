@@ -38,7 +38,7 @@ def test_hierachy(dof=4, n_ltc: int = 1, dim: int = 20, rank: int = 20):
         b = UnderdampedBrownian(
             __(SCALE * 1000 / dof / (_n + 1), '/cm').au,
             __(SCALE * freq, '/cm').au,
-            __(SCALE * 10, '/cm').au, distr)
+            __(SCALE * 50, '/cm').au, distr)
         bosons.append(b)
     for k in range(n_ltc + 1):
         for b in bosons:
@@ -51,8 +51,8 @@ def test_hierachy(dof=4, n_ltc: int = 1, dim: int = 20, rank: int = 20):
     # HEOM settings:
     dims = [dim for _ in range(corr.k_max)]
     heom_op = Hierachy(h, op, corr, dims)
-    # s = TensorTrainEDT(rdo, dims, rank=rank)
-    s = TensorTreeEDT(rdo, dims, n_ary=2, rank=rank)
+    s = TensorTrainEDT(rdo, dims, rank=rank)
+    # s = TensorTreeEDT(rdo, dims, n_ary=2, rank=rank)
 
     # Propagator settings:
     callback_steps = 1
@@ -104,4 +104,4 @@ if __name__ == '__main__':
     #for i in [2, 3]:
     dim = 10
     rank = 20
-    test_hierachy(dof=4, n_ltc=3, dim=dim, rank=rank)
+    test_hierachy(dof=4, n_ltc=1, dim=dim, rank=rank)

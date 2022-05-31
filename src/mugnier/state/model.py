@@ -121,6 +121,9 @@ class Model:
 
         return
 
+    def save(self):
+        pass
+
 
 class CannonialModel(Model):
     """

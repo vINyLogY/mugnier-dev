@@ -117,11 +117,14 @@ class Layer2EDT(CannonialModel):
 
 class TensorTrainEDT(CannonialModel):
 
-    def __init__(self, rdo: Array, dims: list[int], rank: int = 1) -> None:
+    def __init__(self, rdo: Array, dims: list[int], rank: int = 1, rev: bool = False) -> None:
         shape = list(rdo.shape)
         assert len(shape) == 2 and shape[0] == shape[1]
 
-        ends = [_end(k) for k in range(len(dims))]
+        if rev:
+            ends = [_end(k) for k in reversed(range(len(dims)))]
+        else:
+            ends = [_end(k) for k in range(len(dims))]
         f = Frame()
         dof = len(dims)
         e_node = Node('Elec')
