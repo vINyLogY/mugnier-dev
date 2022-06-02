@@ -1,49 +1,27 @@
 # coding: utf-8
 
-import enum
-from math import log, log10, prod
+import argparse
+import os
 from time import time
-from tqdm import trange
+
+from mugnier.heom.bath import BoseEinstein, Correlation, Drude, SpectralDensity, UnderdampedBrownian
+from mugnier.heom.hierachy import ExtendedDensityTensor, Hierachy, TensorTrainEDT, TensorTreeEDT
 from mugnier.libs import backend
 from mugnier.libs.logging import Logger
 from mugnier.libs.quantity import Quantity as __
-from mugnier.heom.hierachy import ExtendedDensityTensor, Hierachy, TensorTrainEDT, TensorTreeEDT
-from mugnier.heom.bath import BoseEinstein, Correlation, Drude, SpectralDensity, UnderdampedBrownian
-from mugnier.operator.spo import MasterEqn, Propagator
-from mugnier.state.frame import End
+from mugnier.operator.spo import Propagator
 
 
-def test_hierachy(
-    out_filename: str,
-    elec_bias: float = 5000.0,
-    elec_coupling: float = 0.0,
-    freq_max: float = 2000.0,
-    re: float = 1000.0,
-    width: float = 50.0,
-    dof: int = 4,
-    n_ltc: int = 3,
-    dim: int = 10,
-    rank: int = 20,
-    decomposition_method: str = 'Pade',
-    htd_method: str = 'Train',
-    heom_factor: float = 2,
-    ode_rtol: float = 1.0e-5,
-    ode_atol: float = 1.0e-8,
-    svd_atol: float = 1.0e-8,
-    ps_method: str = 'vmf',
-    ode_method: str = 'dopri5',
-    reg_method: str = 'proper',
-    dt: float = 0.1,
-    end: float = 100.0,
-    callback_steps: int = 1,
-    dry_run: bool = False,
-):
-    print(f'HT({htd_method}) | DC({decomposition_method})' +
-          f' | PS({ps_method}) | REG({reg_method}) | ODE({ode_method})' +
-          f' | HEOM({heom_factor:.2f}) | {backend.tol}')
+def test_hierachy(out: str, elec_bias: float, elec_coupling: float, freq_max: float, re_b: float, width_b: float,
+                  dof: int, n_ltc: int, dim: int, rank: int, decomposition_method: str, htd_method: str,
+                  heom_factor: float, ode_rtol: float, ode_atol: float, svd_atol: float, ps_method: str,
+                  ode_method: str, reg_method: str, dt: float, end: float, callback_steps: int, dry_run: bool,
+                  temperature: float):
+
     backend.tol.ode_rtol = ode_rtol
     backend.tol.ode_atol = ode_atol
     backend.tol.svd_atol = svd_atol
+    print(f'\nBackend settings: {backend.tol} | {backend.device}')
 
     # System settings:
     SCALE = 1 / __(elec_bias, '/cm').au
@@ -55,16 +33,15 @@ def test_hierachy(
     rdo = backend.array([[0.5, 0.5], [0.5, 0.5]])
 
     # Bath settings:
-    distr = BoseEinstein(n=n_ltc, beta=__(1 / SCALE / 300, '/K').au)
+    distr = BoseEinstein(n=n_ltc, beta=__(1 / SCALE / temperature, '/K').au)
     distr.decomposition_method = decomposition_method
-    print(distr)
     sds = list()  # type:list[SpectralDensity]
     freq_space = [freq_max / (dof + 1) * (n + 1) for n in range(dof)]
     for _n, freq in enumerate(freq_space):
         b = UnderdampedBrownian(
-            __(SCALE * re / dof / (_n + 1), '/cm').au,
+            __(SCALE * re_b / dof / (_n + 1), '/cm').au,
             __(SCALE * freq, '/cm').au,
-            __(SCALE * width, '/cm').au,
+            __(SCALE * width_b, '/cm').au,
             distr.function,
         )
         sds.append(b)
@@ -89,18 +66,16 @@ def test_hierachy(
     # Propagator settings:
     steps = int(end / dt) * callback_steps
     interval = __(0.1 / SCALE / callback_steps, 'fs')
-
     propagator = Propagator(heom_op, s, interval.au, ode_method=ode_method, ps_method=ps_method, reg_method=reg_method)
-
     if dry_run:
         print('Smoke testing...')
         propagator.step()
         return
     else:
-        if not out_filename.endswith('.log'):
-            out_filename += '.log'
-        print(f'Write in `{out_filename}`...')
-        logger = Logger(filename=out_filename, level='info').logger
+        if not out.endswith('.log'):
+            out += '.log'
+        print(f'Write in `{out}`...')
+        logger = Logger(filename=out, level='info').logger
         logger.info('# time rdo00 rdo01 rdo10 rdo11')
         cpu_time0 = time()
         for _n, _t in zip(range(steps), propagator):
@@ -125,25 +100,37 @@ def test_hierachy(
 
 
 if __name__ == '__main__':
-    import os
-    import argparse
-    parser = argparse.ArgumentParser(description='Brownian HEOM.')
+    f_name = os.path.splitext(os.path.basename(__file__))[0]
+    os.chdir(os.path.abspath(os.path.dirname(__file__)))
+
+    parser = argparse.ArgumentParser(description='Drude + Brownian HEOM.')
     parser.add_argument('--dry_run', action='store_true')
-    parser.add_argument('--freq_max', type=float, default=2000.)
-    parser.add_argument('--re', type=float, default=1000.)
-    parser.add_argument('--width', type=float, default=50.0)
+    parser.add_argument('--freq_max', type=float, default=2000.0)
+    parser.add_argument('--re_b', type=float, default=1000.0)
+    parser.add_argument('--width_b', type=float, default=50.0)
     parser.add_argument('--dof', type=int, default=4)
     parser.add_argument('--n_ltc', type=int, default=3)
     parser.add_argument('--heom_factor', type=float, default=2.0)
     parser.add_argument('--dim', type=int, default=10)
     parser.add_argument('--rank', type=int, default=20)
+    parser.add_argument('--decomposition_method', type=str, default='Pade')
+    parser.add_argument('--htd_method', type=str, default='Train')
+    parser.add_argument('--ps_method', type=str, default='vmf')
+    parser.add_argument('--ode_method', type=str, default='dopri5')
+    parser.add_argument('--reg_method', type=str, default='proper')
+    parser.add_argument('--ode_rtol', type=float, default=1.0e-6)
+    parser.add_argument('--ode_atol', type=float, default=1.0e-8)
+    parser.add_argument('--svd_atol', type=float, default=1.0e-8)
+    parser.add_argument('--elec_coupling', type=float, default=0.0)
+    parser.add_argument('--elec_bias', type=float, default=5000.0)
+    parser.add_argument('--dt', type=float, default=0.1)
+    parser.add_argument('--end', type=float, default=100.0)
+    parser.add_argument('--callback_steps', type=int, default=1)
+    parser.add_argument('--temperature', type=float, default=300.0)
+    parser.add_argument('--out', type=str, default=f_name + '.log')
 
-    f_dir = os.path.abspath(os.path.dirname(__file__))
-    os.chdir(os.path.join(f_dir))
     args = parser.parse_args()
-    print(args)
-    kwargs = {}
-    for arg in vars(args):
-        kwargs[arg] = getattr(args, arg)
-    fname = f"brownian-fm{args.freq_max}-re{args.re}-w{args.width}-{args.dof}+{args.n_ltc}({args.dim})[{args.rank}]-{backend.device}.log"
-    test_hierachy(fname, **kwargs)
+    kwargs = {arg: getattr(args, arg) for arg in vars(args)}
+    for k, v in sorted(kwargs.items()):
+        print(f"{k}: {v}")
+    test_hierachy(**kwargs)
