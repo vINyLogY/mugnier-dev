@@ -144,15 +144,15 @@ class Correlation(object):
         for res, pole in residues:
             d = -1.0j * pole
             cs = [-2.0j * PI * res * sd.function(pole) for sd in self.spectral_densities if callable(sd.function)]
-            c = np.sum(cs)
-            if abs(c) > self.roundoff:
+            if cs:
+                c = np.sum(cs)
                 self.coefficients.append(c)
                 self.conj_coefficents.append(np.conj(c))
                 self.derivatives.append(d)
         return
 
     def __str__(self) -> None:
-        string = "Correlation (c | c* | g):\n"
+        string = f"Correlation {self.k_max} * ( c | c* | g ):\n"
         for c, cc, g in zip(self.coefficients, self.conj_coefficents, self.derivatives):
             string += f"{c.real:+.4e}{c.imag:+.4e}j | {cc.real:+.4e}{cc.imag:+.4e}j | {g.real:+.4e}{g.imag:+.4e}j\n"
         return string

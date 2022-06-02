@@ -17,11 +17,8 @@ def test_hierachy(
     out_filename: str,
     elec_bias: float = 5000.0,
     elec_coupling: float = 500.0,
-    freq_max: float = 2000.0,
-    re_d: float = 200.0,
-    re_b: float = 1000.0,
-    width_d: float = 100.0,
-    width_b: float = 50.0,
+    re: float = 200.0,
+    width: float = 100.0,
     dof: int = 4,
     n_ltc: int = 1,
     dim: int = 10,
@@ -57,19 +54,8 @@ def test_hierachy(
     distr = BoseEinstein(n=n_ltc, beta=__(1 / SCALE / 300, '/K').au)
     distr.decomposition_method = decomposition_method
     print(distr)
-
-    drude = Drude(__(SCALE * re_d, '/cm').au, __(SCALE * width_d, '/cm').au, distr.function)
-    sds = [drude]  # type:list[SpectralDensity]
-    freq_space = [freq_max / (dof + 1) * (n + 1) for n in range(dof)]
-    for _n, freq in enumerate(freq_space):
-        b = UnderdampedBrownian(
-            __(SCALE * re_b / dof / (_n + 1), '/cm').au,
-            __(SCALE * freq, '/cm').au,
-            __(SCALE * width_b, '/cm').au,
-            distr.function,
-        )
-        sds.append(b)
-    corr = Correlation(sds, distr)
+    drude = Drude(__(SCALE * re, '/cm').au, __(SCALE * width, '/cm').au, distr.function)
+    corr = Correlation([drude], distr)
     print(corr)
 
     # HEOM settings:
@@ -90,9 +76,7 @@ def test_hierachy(
     # Propagator settings:
     steps = int(end / dt) * callback_steps
     interval = __(0.1 / SCALE / callback_steps, 'fs')
-
     propagator = Propagator(heom_op, s, interval.au, ode_method=ode_method, ps_method=ps_method, reg_method=reg_method)
-
     if dry_run:
         print('Smoke testing...')
         propagator.step()
@@ -108,7 +92,6 @@ def test_hierachy(
             rdo = s.get_rdo()
             t = _t * SCALE
             logger.info(f'{t} {rdo[0, 0]} {rdo[0, 1]} {rdo[1, 0]} {rdo[1, 1]}')
-
             if _n % callback_steps == 0:
                 trace = rdo[0, 0] + rdo[1, 1]
                 coh = abs(rdo[0, 1])
@@ -121,18 +104,16 @@ def test_hierachy(
                 propagator.ode_step_counter = []
                 if coh > 0.55:
                     break
-
         return
 
 
 if __name__ == '__main__':
     import os
     import argparse
-    parser = argparse.ArgumentParser(description='Drude + Brownian HEOM.')
+    parser = argparse.ArgumentParser(description='Drudian HEOM.')
     parser.add_argument('--dry_run', action='store_true')
-    parser.add_argument('--freq_max', type=float, default=2000.0)
-    parser.add_argument('--re_b', type=float, default=10000.)
-    parser.add_argument('--width_b', type=float, default=50.0)
+    parser.add_argument('--re', type=float, default=10000.)
+    parser.add_argument('--width', type=float, default=50.0)
     parser.add_argument('--dof', type=int, default=4)
     parser.add_argument('--n_ltc', type=int, default=3)
     parser.add_argument('--heom_factor', type=float, default=2.0)

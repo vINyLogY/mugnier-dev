@@ -15,17 +15,18 @@ from mugnier.state.frame import End
 
 def test_hierachy(
     out_filename: str,
-    elec_bias: float = 5000,
-    elec_coupling: float = 500,
-    freq_max: float = 2000,
-    re: float = 1000,
-    width: float = 50,
+    elec_bias: float = 5000.0,
+    elec_coupling: float = 500.0,
+    freq_max: float = 2000.0,
+    re: float = 1000.0,
+    width: float = 50.0,
     dof: int = 4,
     n_ltc: int = 1,
     dim: int = 10,
     rank: int = 20,
-    decomposition_method: str = 'Matsubara',
+    decomposition_method: str = 'Pade',
     htd_method: str = 'Train',
+    heom_factor: float = 2,
     ode_rtol: float = 1.0e-5,
     ode_atol: float = 1.0e-8,
     svd_atol: float = 1.0e-8,
@@ -53,9 +54,7 @@ def test_hierachy(
     # Bath settings:
     distr = BoseEinstein(n=n_ltc, beta=__(1 / SCALE / 300, '/K').au)
     distr.decomposition_method = decomposition_method
-    corr = Correlation(distr)
     print(distr)
-
     sds = list()  # type:list[SpectralDensity]
     freq_space = [freq_max / (dof + 1) * (n + 1) for n in range(dof)]
     for _n, freq in enumerate(freq_space):
@@ -71,7 +70,7 @@ def test_hierachy(
 
     # HEOM settings:
     dims = [dim for _ in range(corr.k_max)]
-    Hierachy.scaling_factor = 1
+    Hierachy.scaling_factor = heom_factor
     heom_op = Hierachy(h, op, corr, dims)
     if htd_method == 'Train':
         s = TensorTrainEDT(rdo, dims, rank=rank)
@@ -132,12 +131,14 @@ if __name__ == '__main__':
     parser.add_argument('--width', type=float, default=50.0)
     parser.add_argument('--dof', type=int, default=4)
     parser.add_argument('--n_ltc', type=int, default=3)
+    parser.add_argument('--heom_factor', type=float, default=2.0)
     parser.add_argument('--dim', type=int, default=10)
     parser.add_argument('--rank', type=int, default=20)
 
     f_dir = os.path.abspath(os.path.dirname(__file__))
     os.chdir(os.path.join(f_dir))
     args = parser.parse_args()
+    print(args)
     kwargs = {}
     for arg in vars(args):
         kwargs[arg] = getattr(args, arg)
