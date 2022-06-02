@@ -2,6 +2,7 @@
 
 import enum
 from math import log, log10, prod
+from time import time
 from tqdm import trange
 from mugnier.libs import backend
 from mugnier.libs.logging import Logger
@@ -12,12 +13,10 @@ from mugnier.operator.spo import MasterEqn, Propagator
 from mugnier.state.frame import End
 
 
-
-
-def test_hierachy(freq_max: float=2000,
-                  re: float=1000,
-                  width: float=50,
-                  dof:int=4,
+def test_hierachy(freq_max: float = 2000,
+                  re: float = 1000,
+                  width: float = 50,
+                  dof: int = 4,
                   n_ltc: int = 1,
                   dim: int = 10,
                   rank: int = 20,
@@ -49,8 +48,8 @@ def test_hierachy(freq_max: float=2000,
             corr.coefficients.append(b.coefficients[k])
             corr.conj_coefficents.append(b.conj_coefficents[k])
             corr.derivatives.append(b.derivatives[k])
-    print('Inv. Temp.: ', distr.beta)
-    corr.print()
+    print(f'Inv. Temp.: {distr.beta:.4f}')
+    print(corr)
 
     # HEOM settings:
     dims = [dim for _ in range(corr.k_max)]
@@ -70,14 +69,9 @@ def test_hierachy(freq_max: float=2000,
 
     propagator = Propagator(heom_op, s, interval.au, ode_method=ode_method, ps_method=ps_method, reg_method=reg_method)
 
-    fname = (
-        f'brownian2-fm{freq_max}-re{re}-w{width}-{dof}x{n_ltc+1}({dim})[{rank}]'
-        + f'-{backend.device}.log'
-    )
-    meta_string = (
-        f'-{type(s).__name__}-{distr.decomposition_method}-ps{ps_method}-{reg_method}-{ode_method}'
-        + f'-[{log10(backend.ODE_RTOL):+.0f}({log10(backend.ODE_ATOL):+.0f}){log10(backend.SVD_ATOL):+.0f}])'
-    )
+    fname = (f'brownian-fm{freq_max}-re{re}-w{width}-{dof}x{n_ltc+1}({dim})[{rank}]' + f'-{backend.device}.log')
+    meta_string = (f'-{type(s).__name__}-{distr.decomposition_method}-ps{ps_method}-{reg_method}-{ode_method}' +
+                   f'-[{log10(backend.ODE_RTOL):+.0f}({log10(backend.ODE_ATOL):+.0f}){log10(backend.SVD_ATOL):+.0f}])')
 
     if dry_run:
         print('Smoke testing...')
@@ -91,6 +85,7 @@ def test_hierachy(freq_max: float=2000,
         logger2 = Logger(filename='_' + fname, level='info').logger
         logger2.info(f'# {meta_string}')
         logger2.info('# time ODE_steps')
+        cpu_time0 = time()
         for _n, _t in zip(range(steps), propagator):
             rdo = s.get_rdo()
             t = _t * SCALE
@@ -101,11 +96,16 @@ def test_hierachy(freq_max: float=2000,
                 trace = rdo[0, 0] + rdo[1, 1]
                 coh = abs(rdo[0, 1])
                 _steps = sum(propagator.ode_step_counter)
-                print(f'Tr:1{(trace.real - 1):+e}{trace.imag:+e}j | Coh:{coh:f} | ODE steps:{_steps}')
+                cpu_time = time()
+                print(
+                    f'({cpu_time - cpu_time0}) {__(t).convert_to("fs").value:.1f} fs | Tr:1{(trace.real - 1):+e}{trace.imag:+e}j | Coh:{coh:f} | ODE steps:{_steps}'
+                )
+                cpu_time0 = cpu_time
                 propagator.ode_step_counter = []
                 if coh > 0.55:
                     break
-            return
+
+        return
 
 
 if __name__ == '__main__':
@@ -114,16 +114,15 @@ if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description='Brownian HEOM.')
     parser.add_argument('--dry_run', action='store_true')
-    parser.add_argument('--freq_max',type=float, default=2000.)
-    parser.add_argument('--re', type=float,  default=1000.)
+    parser.add_argument('--freq_max', type=float, default=2000.)
+    parser.add_argument('--re', type=float, default=1000.)
     parser.add_argument('--width', type=float, default=50.0)
     parser.add_argument('--dof', type=int, default=4)
     parser.add_argument('--n_ltc', type=int, default=3)
-    parser.add_argument('--dim',type=int, default=10)
+    parser.add_argument('--dim', type=int, default=10)
     parser.add_argument('--rank', type=int, default=20)
 
     # br=50, dof=4, n_ltc: int = 1, dim: int = 20, rank: int = 20
-
 
     f_dir = os.path.abspath(os.path.dirname(__file__))
     os.chdir(os.path.join(f_dir))

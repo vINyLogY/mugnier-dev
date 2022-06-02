@@ -126,13 +126,11 @@ class Correlation(object):
 
         return
 
-    def print(self) -> None:
-        string = f"""Correlation coefficents:
-            c: {array(self.coefficients)};
-            (c* = {array(self.conj_coefficents)};)
-            gamma: {array(self.derivatives)}.
-        """
-        print(string)
+    def __str__(self) -> None:
+        string = "Correlation (c | c* | g):\n"
+        for c, cc, g in zip(self.coefficients, self.conj_coefficents, self.derivatives):
+            string += f"{c.real:+.4e}{c.imag:+.4e}j | {cc.real:+.4e}{cc.imag:+.4e}j | {g.real:+.4e}{g.imag:+.4e}j\n"
+        return string
 
     def __add__(self, other: Correlation) -> Correlation:
         assert isinstance(other, Correlation)
