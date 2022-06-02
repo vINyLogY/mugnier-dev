@@ -8,7 +8,7 @@ from mugnier.libs import backend
 from mugnier.libs.logging import Logger
 from mugnier.libs.quantity import Quantity as __
 from mugnier.heom.hierachy import ExtendedDensityTensor, Hierachy, TensorTrainEDT, TensorTreeEDT
-from mugnier.heom.bath import BoseEinstein, Correlation, Drude, UnderdampedBrownian
+from mugnier.heom.bath import BoseEinstein, Correlation, Drude, SpectralDensity, UnderdampedBrownian
 from mugnier.operator.spo import MasterEqn, Propagator
 from mugnier.state.frame import End
 
@@ -54,25 +54,24 @@ def test_hierachy(
     distr = BoseEinstein(n=n_ltc, beta=__(1 / SCALE / 300, '/K').au)
     distr.decomposition_method = decomposition_method
     corr = Correlation(distr)
+    print(distr)
 
+    sds = list()  # type:list[SpectralDensity]
     freq_space = [freq_max / (dof + 1) * (n + 1) for n in range(dof)]
-    bosons = []  # type:list[UnderdampedBrownian]
     for _n, freq in enumerate(freq_space):
         b = UnderdampedBrownian(
             __(SCALE * re / dof / (_n + 1), '/cm').au,
             __(SCALE * freq, '/cm').au,
-            __(SCALE * width, '/cm').au, distr)
-        bosons.append(b)
-    for k in range(n_ltc + 1):
-        for b in bosons:
-            corr.coefficients.append(b.coefficients[k])
-            corr.conj_coefficents.append(b.conj_coefficents[k])
-            corr.derivatives.append(b.derivatives[k])
-    print(distr)
+            __(SCALE * width, '/cm').au,
+            distr.function,
+        )
+        sds.append(b)
+    corr = Correlation(sds, distr)
     print(corr)
 
     # HEOM settings:
     dims = [dim for _ in range(corr.k_max)]
+    Hierachy.scaling_factor = 1
     heom_op = Hierachy(h, op, corr, dims)
     if htd_method == 'Train':
         s = TensorTrainEDT(rdo, dims, rank=rank)

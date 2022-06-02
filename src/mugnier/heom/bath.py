@@ -6,7 +6,9 @@ Decomposition of the bath and BE distribution
 from __future__ import annotations
 from math import gamma
 
-from typing import Literal, Optional, Tuple
+from typing import Callable, Literal, Optional, Tuple
+
+from matplotlib.pyplot import cla
 
 from mugnier.libs.backend import PI, Array, array, np
 
@@ -41,7 +43,7 @@ class BoseEinstein(object):
             info = self.decomposition_method
         return f'Bose-Einstein at ß = {self.beta:.4f} ({info}; N={self.n})'
 
-    def func(self, w: complex) -> complex:
+    def function(self, w: complex) -> complex:
         beta = self.beta
         if beta is None:
             return 1.0
@@ -101,49 +103,52 @@ class BoseEinstein(object):
 
 
 class Correlation(object):
+    roundoff = 1.0e-8
 
-    def __init__(self, distribution: BoseEinstein) -> None:
+    def __init__(self, spectral_densities: list[SpectralDensity], distribution: BoseEinstein) -> None:
+        self.spectral_densities = spectral_densities
         self.distribution = distribution
 
         self.coefficients = list()  # type: list[complex]
         self.conj_coefficents = list()  # type: list[complex]
         self.derivatives = list()  # type: list[complex]
-        self.closure = None
+
+        for sd in spectral_densities:
+            cs, ccs, ds = sd.get_htc()
+            self.coefficients.extend(cs)
+            self.conj_coefficents.extend(ccs)
+            self.derivatives.extend(ds)
+        self.get_ltc()
         return
 
     def fix(self) -> None:
+        """Fix underflow in the coefficients."""
 
-        def _fix(num: complex, roundoff: float = 1.0e-8) -> complex:
-            re = 0.0 if abs(num.real) < roundoff else num.real
-            im = 0.0 if abs(num.imag) < roundoff else num.imag
+        def _fix(num: complex) -> complex:
+            re = 0.0 if abs(num.real) < self.roundoff else num.real
+            im = 0.0 if abs(num.imag) < self.roundoff else num.imag
             return re + 1.0j * im
 
-        self.coefficients = map(_fix, self.coefficients)
-        self.conj_coefficents = map(_fix, self.conj_coefficents)
-        self.derivatives = map(_fix, self.derivatives)
+        self.coefficients = list(map(_fix, self.coefficients))
+        self.conj_coefficents = list(map(_fix, self.conj_coefficents))
+        self.derivatives = list(map(_fix, self.derivatives))
         return
-
 
     @property
     def k_max(self) -> int:
         return len(self.derivatives)
 
-    def spectral_density(self, w: complex) -> complex:
-        raise NotImplementedError
 
-    def get_correlation(self) -> None:
-        raise NotImplementedError
-
-    def get_correction(self) -> None:
-        zipped = [
-            (-2.0j * PI * res * self.spectral_density(pole), -1.0j * pole) for res, pole in self.distribution.residues
-        ]
-        if zipped:
-            _cs, _ds = zip(*zipped)
-            self.coefficients.extend(_cs)
-            self.conj_coefficents.extend(np.conj(_c) for _c in _cs)
-            self.derivatives.extend(_ds)
-
+    def get_ltc(self) -> None:
+        residues = self.distribution.residues
+        for res, pole in residues:
+            d = -1.0j * pole
+            cs = [-2.0j * PI * res * sd.function(pole) for sd in self.spectral_densities if callable(sd.function)]
+            c = np.sum(cs)
+            if abs(c) > self.roundoff:
+                self.coefficients.append(c)
+                self.conj_coefficents.append(np.conj(c))
+                self.derivatives.append(d)
         return
 
     def __str__(self) -> None:
@@ -152,97 +157,74 @@ class Correlation(object):
             string += f"{c.real:+.4e}{c.imag:+.4e}j | {cc.real:+.4e}{cc.imag:+.4e}j | {g.real:+.4e}{g.imag:+.4e}j\n"
         return string
 
-    def __add__(self, other: Correlation) -> Correlation:
-        assert isinstance(other, Correlation)
-        assert self.distribution.beta == other.distribution.beta
-        cls = type(self)
-        distr = type(self.distribution)
-        obj = cls(distribution=distr(beta=self.distribution.beta))
-        for attr in ['coefficients', 'conj_coefficents', 'derivatives']:
-            setattr(obj, attr, getattr(self, attr) + getattr(other, attr))
-        return obj
-
-
-class Drude(Correlation):
-
-    def __init__(self, reorganization_energy: float, relaxation: float, distribution: BoseEinstein) -> None:
-        self.l = reorganization_energy
-        self.g = relaxation
-
-        super().__init__(distribution)
-        self.get_correlation()
-        self.get_correction()
+class SpectralDensity:
+    def __init__(self, f: Callable[[complex], complex]) -> None:
+        self.f = f
         return
 
-    def spectral_density(self, w: complex) -> complex:
+    def function(self, w: complex) -> complex:
+        pass
+
+    def get_htc(self) -> Tuple[list[complex], list[complex], list[complex]]:
+        pass
+
+class Drude(SpectralDensity):
+
+    def __init__(self, reorganization_energy: float, relaxation: float,  f: Callable[[complex], complex]) -> None:
+        super().__init__(f)
+        self.l = reorganization_energy
+        self.g = relaxation
+        return
+
+    def function(self, w: complex) -> complex:
         l = self.l
         g = self.g
         return (2.0 / PI) * l * g * w / (w**2 + g**2)
 
-    def get_correlation(self) -> None:
-        f = self.distribution.func
-        _c = -2.0j * self.l * self.g * f(-1.0j * self.g)
+    def get_htc(self) -> Tuple[list[complex], list[complex], list[complex]]:
+        _c = -2.0j * self.l * self.g * self.f(-1.0j * self.g)
         _d = -self.g
-        self.coefficients.append(_c)
-        self.conj_coefficents.append(np.conj(_c))
-        self.derivatives.append(_d)
+        coefficients = [_c]
+        conj_coefficents = [np.conj(_c)]
+        derivatives = [_d]
+        return coefficients, conj_coefficents, derivatives
 
-        return
 
-
-class DiscreteVibration(Correlation):
-    rtol = 0.01
-
-    def __init__(self, frequency: float, coupling: float, distribution: BoseEinstein) -> None:
+class DiscreteVibration(SpectralDensity):
+    def __init__(self, frequency: float, coupling: float, beta: Optional[float]) -> None:
         self.w0 = frequency
         self.g = coupling
-
-        super().__init__(distribution)
-        self.get_correlation()
+        self.beta = beta
         return
 
-    def spectral_density(self, w: complex) -> complex:
-        w0 = self.w0
-        tol = self.rtol * w0
-        return self.g**2 / (2.0 * tol) if abs(w - w0) < tol else 0.0
-
-    def get_correlation(self) -> None:
-        beta = self.distribution.beta
+    def get_htc(self) -> Tuple[list[complex], list[complex], list[complex]]:
         w0 = self.w0
         g = self.g
-        f = 1.0 / np.tanh(beta * w0 / 2.0) if beta is not None else 1.0
+        beta = self.beta
+        coth = 1.0 / np.tanh(beta * w0 / 2.0) if beta is not None else 1.0
+        coefficients = [g**2 / 2.0 * (coth + 1.0), g**2 / 2.0 * (coth - 1.0)]
+        conj_coefficents = [g**2 / 2.0 * (coth - 1.0), g**2 / 2.0 * (coth + 1.0)]
+        derivatives = [-1.0j * w0, +1.0j * w0]
+        return coefficients, conj_coefficents, derivatives
 
-        self.coefficients.extend([g**2 / 2.0 * (f + 1.0), g**2 / 2.0 * (f - 1.0)])
-        self.conj_coefficents.extend([g**2 / 2.0 * (f - 1.0), g**2 / 2.0 * (f + 1.0)])
-        self.derivatives.extend([-1.0j * w0, +1.0j * w0])
-        return
-
-    def get_correction(self) -> None:
-        """No corrections for discrete vibrations"""
-        return
-
-
-class UnderdampedBrownian(Correlation):
+class UnderdampedBrownian(SpectralDensity):
 
     def __init__(self, reorganization_energy: float, frequency: float, relaxation: float,
-                 distribution: BoseEinstein) -> None:
+                 f: Callable[[complex], complex]) -> None:
+        super().__init__(f)
         self.w0 = frequency
         self.g = relaxation
         self.l = reorganization_energy
-
-        super().__init__(distribution)
-        self.get_correlation()
-        self.get_correction()
         return
 
-    def spectral_density(self, w: complex) -> complex:
+    def function(self, w: complex) -> complex:
         l = self.l
         g = self.g
         w0 = self.w0
         return (4.0 / PI) * l * g * (w0**2 + g**2) * w / ((w + w0)**2 + g**2) / ((w - w0)**2 + g**2)
 
-    def get_correlation(self) -> None:
-        f = self.distribution.func
+    def get_htc(self) -> Tuple[list[complex], list[complex], list[complex]]:
+        f = self.f
         l = self.l
         g = self.g
         w0 = self.w0
@@ -251,7 +233,7 @@ class UnderdampedBrownian(Correlation):
         c1 = +a * f(-1.0j * (g + 1.0j * w0))
         c2 = -a * f(-1.0j * (g - 1.0j * w0))
 
-        self.coefficients.extend([c1, c2])
-        self.conj_coefficents.extend([np.conj(c2), np.conj(c1)])
-        self.derivatives.extend([-(g + 1.0j * w0), -(g - 1.0j * w0)])
-        return
+        coefficients = [c1, c2]
+        conj_coefficents = [np.conj(c2), np.conj(c1)]
+        derivatives = [-(g + 1.0j * w0), -(g - 1.0j * w0)]
+        return coefficients, conj_coefficents, derivatives
