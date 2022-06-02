@@ -1,15 +1,13 @@
 # coding: utf-8
 
-from itertools import chain, count
+from itertools import chain
 from math import prod
-from re import S
-from typing import Callable, Generator, Iterable, Literal, Optional, Tuple
+from typing import Callable, Generator, Literal, Optional, Tuple
 
 import numpy as np
-from mugnier.libs import backend
 from mugnier.libs.backend import (MAX_EINSUM_AXES, Array, OptArray, eye, odeint, opt_einsum, opt_inv, opt_pinv,
                                   opt_regularized_qr, opt_sum, opt_svd, opt_tensordot, optimize, opt_cat, opt_split)
-from mugnier.state.frame import End, Node, Point
+from mugnier.state.frame import End, Node
 from mugnier.state.model import CannonialModel
 
 
@@ -526,8 +524,8 @@ class Propagator:
                  state: CannonialModel,
                  dt: float,
                  ode_method: Literal['bosh3', 'dopri5', 'dopri8'] = 'dopri5',
-                 reg_method: Literal['proper', 'fast', 'proper_qr', 'fast_qr', None] = 'proper',
-                 ps_method: Literal[0, 1, 2, None] = None) -> None:
+                 reg_method: Literal['proper', 'fast', 'proper_qr', 'fast_qr', 'pinv'] = 'proper',
+                 ps_method: Literal['cmf', 'ps1', 'ps2', 'vmf'] = 'vmf') -> None:
 
         self.eom = MasterEqn(op, state)
         self.state = self.eom.state
@@ -554,20 +552,20 @@ class Propagator:
         return
 
     def step(self) -> None:
-        if self.ps_method == 0:
+        if self.ps_method == 'cmf':
             self.eom._get_mean_fields_type1()
             self.eom._get_reg_mean_fields()
             for p in self._node_visitor:
                 self._node_step(p, 1.0)
-        elif self.ps_method == 1:
+        elif self.ps_method == 'ps1':
             self.eom._get_mean_fields_type1()
             self.ps1_forward_step(0.5)
             self.ps1_backward_step(0.5)
-        elif self.ps_method == 2:
+        elif self.ps_method == 'ps2':
             self.eom._get_mean_fields_type1()
             self.ps2_forward_step(0.5)
             self.ps2_backward_step(0.5)
-        else:
+        elif self.ps_method == 'vmf':
             y = self.eom.vector()
             if self.reg_method == 'fast':
                 ans = self._odeint(self.eom.vector_reg_eom(fast=True, use_qr=False), y, 1.0)
@@ -577,9 +575,13 @@ class Propagator:
                 ans = self._odeint(self.eom.vector_reg_eom(fast=True, use_qr=True), y, 1.0)
             elif self.reg_method == 'proper_qr':
                 ans = self._odeint(self.eom.vector_reg_eom(fast=False, use_qr=True), y, 1.0)
-            else:
+            elif self.reg_method == 'pinv':
                 ans = self._odeint(self.eom.vector_eom(), y, 1.0)
+            else:
+                raise NotImplementedError(f'No regularization method `{self.reg_method}`.')
             self.eom.vector_update(ans)
+        else:
+            raise NotImplementedError(f'No Projector splitting method `{self.ps_method}`.')
         return
 
     def _node_step(self, p: Node, ratio: float) -> None:
@@ -644,7 +646,6 @@ class Propagator:
         it = self._node_link_visitor
         end = len(it) - 1
         for n, (p, i, q, j) in enumerate(it):
-            # print(p, i, q, j)
             assert p is self.state.root
             if depths[p] < depths[q]:
                 move1(i, op=self._ps1_mid_op(p, i, q, j, None))
@@ -665,7 +666,6 @@ class Propagator:
         it = reversed(self._node_link_visitor)
         for n, (q, j, p, i) in enumerate(it):
             assert p is self.state.root
-            # print(p, i, q, j)
             if depths[p] < depths[q]:
                 if n != 0:
                     self._node_step(p, -ratio)

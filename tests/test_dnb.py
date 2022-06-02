@@ -15,16 +15,18 @@ from mugnier.state.frame import End
 
 def test_hierachy(
     out_filename: str,
-    elec_bias: float = 5000,
-    elec_coupling: float = 500,
-    freq_max: float = 2000,
-    re: float = 1000,
-    width: float = 50,
+    elec_bias: float = 5000.0,
+    elec_coupling: float = 500.0,
+    freq_max: float = 2000.0,
+    re_d: float = 200.0,
+    re_b: float = 1000.0,
+    width_d: float = 100.0,
+    width_b: float = 50.0,
     dof: int = 4,
     n_ltc: int = 1,
     dim: int = 10,
     rank: int = 20,
-    decomposition_method: str = 'Matsubara',
+    decomposition_method: str = 'Pade',
     htd_method: str = 'Train',
     ode_rtol: float = 1.0e-5,
     ode_atol: float = 1.0e-8,
@@ -53,22 +55,24 @@ def test_hierachy(
     # Bath settings:
     distr = BoseEinstein(n=n_ltc, beta=__(1 / SCALE / 300, '/K').au)
     distr.decomposition_method = decomposition_method
-    corr = Correlation(distr)
+    print(distr)
 
+    corr = Correlation(distr)
+    corr += Drude(__(SCALE * re_d, '/cm').au, __(SCALE * width_d, '/cm').au, distr)
     freq_space = [freq_max / (dof + 1) * (n + 1) for n in range(dof)]
     bosons = []  # type:list[UnderdampedBrownian]
     for _n, freq in enumerate(freq_space):
         b = UnderdampedBrownian(
-            __(SCALE * re / dof / (_n + 1), '/cm').au,
+            __(SCALE * re_b / dof / (_n + 1), '/cm').au,
             __(SCALE * freq, '/cm').au,
-            __(SCALE * width, '/cm').au, distr)
+            __(SCALE * width_b, '/cm').au, distr)
         bosons.append(b)
     for k in range(n_ltc + 1):
         for b in bosons:
             corr.coefficients.append(b.coefficients[k])
             corr.conj_coefficents.append(b.conj_coefficents[k])
             corr.derivatives.append(b.derivatives[k])
-    print(distr)
+    corr.fix()
     print(corr)
 
     # HEOM settings:
@@ -128,9 +132,9 @@ if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description='Brownian HEOM.')
     parser.add_argument('--dry_run', action='store_true')
-    parser.add_argument('--freq_max', type=float, default=2000.)
-    parser.add_argument('--re', type=float, default=1000.)
-    parser.add_argument('--width', type=float, default=50.0)
+    parser.add_argument('--freq_max', type=float, default=2000.0)
+    parser.add_argument('--re_b', type=float, default=10000.)
+    parser.add_argument('--width_b', type=float, default=50.0)
     parser.add_argument('--dof', type=int, default=4)
     parser.add_argument('--n_ltc', type=int, default=3)
     parser.add_argument('--dim', type=int, default=10)

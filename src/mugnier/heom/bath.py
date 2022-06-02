@@ -34,6 +34,13 @@ class BoseEinstein(object):
 
         return
 
+    def __str__(self) -> str:
+        if self.decomposition_method == 'Pade':
+            info = f'Padé[{self.pade_type}]'
+        else:
+            info = self.decomposition_method
+        return f'Bose-Einstein at ß = {self.beta:.4f} ({info}; N={self.n})'
+
     def func(self, w: complex) -> complex:
         beta = self.beta
         if beta is None:
@@ -103,6 +110,19 @@ class Correlation(object):
         self.derivatives = list()  # type: list[complex]
         self.closure = None
         return
+
+    def fix(self) -> None:
+
+        def _fix(num: complex, roundoff: float = 1.0e-8) -> complex:
+            re = 0.0 if abs(num.real) < roundoff else num.real
+            im = 0.0 if abs(num.imag) < roundoff else num.imag
+            return re + 1.0j * im
+
+        self.coefficients = map(_fix, self.coefficients)
+        self.conj_coefficents = map(_fix, self.conj_coefficents)
+        self.derivatives = map(_fix, self.derivatives)
+        return
+
 
     @property
     def k_max(self) -> int:

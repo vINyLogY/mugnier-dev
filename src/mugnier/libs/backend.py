@@ -2,6 +2,7 @@
 r"""Backend for accelerated array-operations.
 """
 
+from math import log10
 from typing import Callable, Optional, Tuple
 import numpy as np
 import torch
@@ -18,21 +19,25 @@ MAX_EINSUM_AXES = 52  # restrition from torch.einsum as of PyTorch 1.10
 PI = np.pi
 
 # Place to keep magic numbers
-if DOUBLE_PRECISION:
-    ODE_RTOL = 1.0e-5
-    ODE_ATOL = 1.0e-8
-    SVD_ATOL = 1.0e-8
-else:
-    ODE_RTOL = 1.0e-3
-    ODE_ATOL = 1.0e-6
-    SVD_ATOL = 1.0e-6
+class Tolerence:
+    ode_rtol = 1.0e-5
+    ode_atol = 1.0e-8
+    svd_atol = 1.0e-8
+
+    def __str__(self) -> str:
+        string = f'ODE[{log10(self.ode_rtol):+.0f}]({log10(self.ode_atol):+.0f})'
+        string += f'SVD({log10(self.svd_atol):+.0f})'
+
+tol = Tolerence()
 
 # CPU settings
-
 if DOUBLE_PRECISION:
     dtype = np.complex128
 else:
     dtype = np.complex64
+    tol.ode_rtol = 1.0e-3
+    tol.ode_atol = 1.0e-6
+    tol.svd_atol = 1.0e-6
 Array = NDArray[dtype]
 
 
@@ -143,19 +148,7 @@ def opt_compressed_qr(a: OptArray,
 @torch.no_grad()
 def opt_svd(a: OptArray) -> Tuple[OptArray, OptArray]:
     u, s, vh = torch.linalg.svd(a, full_matrices=False)
-    # error = 0.0
-    # l = len(s)
-    # n = l
-    # for s_i in reversed(s):
-    #     n -= 1
-    #     error += s_i
-    #     if error > PINV_TOL:
-    #         break
-    # tail = l - n - 1
-    # if tail > 0:
-    #     s[n] -= PINV_TOL
-    #     s[n + 1:] += PINV_TOL / tail
-    reg = SVD_ATOL * torch.ones_like(s)
+    reg = tol.svd_atol * torch.ones_like(s)
     s = torch.maximum(s, reg)
     s /= torch.sum(s)
     # print(s)
@@ -182,7 +175,7 @@ def opt_svd(a: OptArray) -> Tuple[OptArray, OptArray]:
 @torch.no_grad()
 def opt_regularized_qr(a: OptArray) -> Tuple[OptArray, OptArray]:
     q, r = torch.linalg.qr(a, mode='reduced')
-    reg = SVD_ATOL * torch.eye(r.shape[0], r.shape[1], device=device, dtype=opt_dtype)
+    reg = tol.svd_atol * torch.eye(r.shape[0], r.shape[1], device=device, dtype=opt_dtype)
     r = torch.where(torch.abs(r) > torch.abs(reg), r, reg)
     return q, r
 
@@ -217,13 +210,13 @@ def odeint(func: Callable[[OptArray], OptArray], y0: OptArray, dt: float, method
     if method == 'BDF':
         y1 = torchdiffeq.odeint(_func, _y0, _t, method='scipy_solver', options={'solver': 'BDF'})
     else:
-        y1 = torchdiffeq.odeint(_func, _y0, _t, method=method, rtol=ODE_RTOL, atol=ODE_ATOL)
+        y1 = torchdiffeq.odeint(_func, _y0, _t, method=method, rtol=tol.ode_rtol, atol=tol.ode_atol)
     return (y1[1][0] + 1.0j * y1[1][1]), _func.calls
 
 
 @torch.no_grad()
 def opt_pinv(a: OptArray) -> OptArray:
-    return torch.linalg.pinv(a, atol=SVD_ATOL)
+    return torch.linalg.pinv(a, atol=tol.svd_atol)
 
 
 @torch.no_grad()
