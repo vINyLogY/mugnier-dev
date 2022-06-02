@@ -16,11 +16,10 @@ from mugnier.state.frame import End
 def test_hierachy(
     out_filename: str,
     elec_bias: float = 5000.0,
-    elec_coupling: float = 500.0,
+    elec_coupling: float = 0.0,
     re: float = 200.0,
     width: float = 100.0,
-    dof: int = 4,
-    n_ltc: int = 1,
+    n_ltc: int = 3,
     dim: int = 10,
     rank: int = 20,
     decomposition_method: str = 'Pade',
@@ -37,6 +36,9 @@ def test_hierachy(
     callback_steps: int = 1,
     dry_run: bool = False,
 ):
+    print(f'HT({htd_method}) | DC({decomposition_method})' +
+          f' | PS({ps_method}) | REG({reg_method}) | ODE({ode_method})' +
+          f' | HEOM({heom_factor:.2f}) | {backend.tol}')
     backend.tol.ode_rtol = ode_rtol
     backend.tol.ode_atol = ode_atol
     backend.tol.svd_atol = svd_atol
@@ -114,7 +116,6 @@ if __name__ == '__main__':
     parser.add_argument('--dry_run', action='store_true')
     parser.add_argument('--re', type=float, default=10000.)
     parser.add_argument('--width', type=float, default=50.0)
-    parser.add_argument('--dof', type=int, default=4)
     parser.add_argument('--n_ltc', type=int, default=3)
     parser.add_argument('--heom_factor', type=float, default=2.0)
     parser.add_argument('--dim', type=int, default=10)
@@ -126,4 +127,5 @@ if __name__ == '__main__':
     kwargs = {}
     for arg in vars(args):
         kwargs[arg] = getattr(args, arg)
-    test_hierachy('debug', **kwargs)
+    fname = f"drude-re{args.re}-w{args.width}-{args.n_ltc}({args.dim})[{args.rank}]-{backend.device}.log"
+    test_hierachy(fname, **kwargs)

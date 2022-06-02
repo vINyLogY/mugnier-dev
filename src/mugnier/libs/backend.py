@@ -27,6 +27,7 @@ class Tolerence:
     def __str__(self) -> str:
         string = f'ODE[{log10(self.ode_rtol):+.0f}]({log10(self.ode_atol):+.0f})'
         string += f'SVD({log10(self.svd_atol):+.0f})'
+        return string
 
 tol = Tolerence()
 

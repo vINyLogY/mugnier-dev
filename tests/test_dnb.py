@@ -16,14 +16,14 @@ from mugnier.state.frame import End
 def test_hierachy(
     out_filename: str,
     elec_bias: float = 5000.0,
-    elec_coupling: float = 500.0,
+    elec_coupling: float = 0.0,
     freq_max: float = 2000.0,
     re_d: float = 200.0,
     re_b: float = 1000.0,
     width_d: float = 100.0,
     width_b: float = 50.0,
     dof: int = 4,
-    n_ltc: int = 1,
+    n_ltc: int = 3,
     dim: int = 10,
     rank: int = 20,
     decomposition_method: str = 'Pade',
@@ -40,6 +40,9 @@ def test_hierachy(
     callback_steps: int = 1,
     dry_run: bool = False,
 ):
+    print(f'HT({htd_method}) | DC({decomposition_method})' +
+          f' | PS({ps_method}) | REG({reg_method}) | ODE({ode_method})' +
+          f' | HEOM({heom_factor:.2f}) | {backend.tol}')
     backend.tol.ode_rtol = ode_rtol
     backend.tol.ode_atol = ode_atol
     backend.tol.svd_atol = svd_atol
@@ -145,4 +148,5 @@ if __name__ == '__main__':
     kwargs = {}
     for arg in vars(args):
         kwargs[arg] = getattr(args, arg)
-    test_hierachy('debug', **kwargs)
+    fname = f"mixed-fm{args.freq_max}-re{args.re_b}-w{args.width_b}-{args.dof}+{args.n_ltc}({args.dim})[{args.rank}]-{backend.device}.log"
+    test_hierachy(fname, **kwargs)
