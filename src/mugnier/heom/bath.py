@@ -114,7 +114,7 @@ class Correlation(object):
         self.derivatives = list()  # type: list[complex]
 
         for sd in spectral_densities:
-            cs, ccs, ds = sd.get_htc()
+            cs, ccs, ds = sd.get_htc(distr=distribution)
             self.coefficients.extend(cs)
             self.conj_coefficents.extend(ccs)
             self.derivatives.extend(ds)
@@ -138,7 +138,6 @@ class Correlation(object):
     def k_max(self) -> int:
         return len(self.derivatives)
 
-
     def get_ltc(self) -> None:
         residues = self.distribution.residues
         for res, pole in residues:
@@ -152,26 +151,28 @@ class Correlation(object):
         return
 
     def __str__(self) -> None:
-        string = f"Correlation {self.k_max} * ( c | c* | g ):\n"
-        for c, cc, g in zip(self.coefficients, self.conj_coefficents, self.derivatives):
-            string += f"{c.real:+.4e}{c.imag:+.4e}j | {cc.real:+.4e}{cc.imag:+.4e}j | {g.real:+.4e}{g.imag:+.4e}j\n"
+        k = self.k_max
+        if k > 0:
+            string = f"Correlation {k} * ( c | c* | g ):"
+            for c, cc, g in zip(self.coefficients, self.conj_coefficents, self.derivatives):
+                string += f"\n{c.real:+.4e}{c.imag:+.4e}j | {cc.real:+.4e}{cc.imag:+.4e}j | {g.real:+.4e}{g.imag:+.4e}j"
+        else:
+            string = 'Empty Correlation object'
         return string
 
+
 class SpectralDensity:
-    def __init__(self, f: Callable[[complex], complex]) -> None:
-        self.f = f
-        return
 
     def function(self, w: complex) -> complex:
         pass
 
-    def get_htc(self) -> Tuple[list[complex], list[complex], list[complex]]:
+    def get_htc(self, distr: BoseEinstein) -> tuple[list[complex], list[complex], list[complex]]:
         pass
+
 
 class Drude(SpectralDensity):
 
-    def __init__(self, reorganization_energy: float, relaxation: float,  f: Callable[[complex], complex]) -> None:
-        super().__init__(f)
+    def __init__(self, reorganization_energy: float, relaxation: float) -> None:
         self.l = reorganization_energy
         self.g = relaxation
         return
@@ -181,8 +182,8 @@ class Drude(SpectralDensity):
         g = self.g
         return (2.0 / PI) * l * g * w / (w**2 + g**2)
 
-    def get_htc(self) -> Tuple[list[complex], list[complex], list[complex]]:
-        _c = -2.0j * self.l * self.g * self.f(-1.0j * self.g)
+    def get_htc(self, distr: BoseEinstein) -> tuple[list[complex], list[complex], list[complex]]:
+        _c = -2.0j * self.l * self.g * distr.function(-1.0j * self.g)
         _d = -self.g
         coefficients = [_c]
         conj_coefficents = [np.conj(_c)]
@@ -191,27 +192,27 @@ class Drude(SpectralDensity):
 
 
 class DiscreteVibration(SpectralDensity):
+
     def __init__(self, frequency: float, coupling: float, beta: Optional[float]) -> None:
         self.w0 = frequency
         self.g = coupling
         self.beta = beta
         return
 
-    def get_htc(self) -> Tuple[list[complex], list[complex], list[complex]]:
+    def get_htc(self, distr: BoseEinstein) -> tuple[list[complex], list[complex], list[complex]]:
         w0 = self.w0
         g = self.g
-        beta = self.beta
+        beta = distr.beta
         coth = 1.0 / np.tanh(beta * w0 / 2.0) if beta is not None else 1.0
         coefficients = [g**2 / 2.0 * (coth + 1.0), g**2 / 2.0 * (coth - 1.0)]
         conj_coefficents = [g**2 / 2.0 * (coth - 1.0), g**2 / 2.0 * (coth + 1.0)]
         derivatives = [-1.0j * w0, +1.0j * w0]
         return coefficients, conj_coefficents, derivatives
 
+
 class UnderdampedBrownian(SpectralDensity):
 
-    def __init__(self, reorganization_energy: float, frequency: float, relaxation: float,
-                 f: Callable[[complex], complex]) -> None:
-        super().__init__(f)
+    def __init__(self, reorganization_energy: float, frequency: float, relaxation: float) -> None:
         self.w0 = frequency
         self.g = relaxation
         self.l = reorganization_energy
@@ -223,8 +224,8 @@ class UnderdampedBrownian(SpectralDensity):
         w0 = self.w0
         return (4.0 / PI) * l * g * (w0**2 + g**2) * w / ((w + w0)**2 + g**2) / ((w - w0)**2 + g**2)
 
-    def get_htc(self) -> Tuple[list[complex], list[complex], list[complex]]:
-        f = self.f
+    def get_htc(self, distr: BoseEinstein) -> Tuple[list[complex], list[complex], list[complex]]:
+        f = distr.function
         l = self.l
         g = self.g
         w0 = self.w0

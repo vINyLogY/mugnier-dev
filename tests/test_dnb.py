@@ -12,8 +12,8 @@ from mugnier.libs.quantity import Quantity as __
 from mugnier.operator.spo import Propagator
 
 
-def test_hierachy(out: str, elec_bias: float, elec_coupling: float, freq_max: float, re_d: float, re_b: float,
-                  width_d: float, width_b: float, dof: int, n_ltc: int, dim: int, rank: int, decomposition_method: str,
+def test_hierachy(out: str, elec_bias: float, elec_coupling: float, freq_max: float, re_b: float, width_b: float,
+                  re_d: float, width_d: float, dof: int, n_ltc: int, dim: int, rank: int, decomposition_method: str,
                   htd_method: str, heom_factor: float, ode_rtol: float, ode_atol: float, svd_atol: float,
                   ps_method: str, ode_method: str, reg_method: str, dt: float, end: float, callback_steps: int,
                   dry_run: bool, temperature: float):
@@ -24,29 +24,29 @@ def test_hierachy(out: str, elec_bias: float, elec_coupling: float, freq_max: fl
     print(f'\nBackend settings: {backend.tol} | {backend.device}')
 
     # System settings:
-    SCALE = 1 / __(elec_bias, '/cm').au
-    e = __(elec_bias * SCALE, '/cm').au
-    v = __(elec_coupling * SCALE, '/cm').au
+    scaling = 1.0 / __(elec_bias, '/cm').au
+    e = __(elec_bias, '/cm').au * scaling
+    v = __(elec_coupling, '/cm').au * scaling
     pop = 0.5
     h = backend.array([[-pop * e, v], [v, (1.0 - pop) * e]])
     op = backend.array([[-pop, 0.0], [0.0, 1.0 - pop]])
     rdo = backend.array([[0.5, 0.5], [0.5, 0.5]])
 
     # Bath settings:
-    distr = BoseEinstein(n=n_ltc, beta=__(1 / SCALE / temperature, '/K').au)
+    distr = BoseEinstein(n=n_ltc, beta=__(1 / temperature, '/K').au / scaling)
     distr.decomposition_method = decomposition_method
-    drude = Drude(__(SCALE * re_d, '/cm').au, __(SCALE * width_d, '/cm').au, distr.function)
+    drude = Drude(__(re_d, '/cm').au / scaling, __(width_d, '/cm').au / scaling, distr.function)
     sds = [drude]  # type:list[SpectralDensity]
     freq_space = [freq_max / (dof + 1) * (n + 1) for n in range(dof)]
     for _n, freq in enumerate(freq_space):
         b = UnderdampedBrownian(
-            __(SCALE * re_b / dof / (_n + 1), '/cm').au,
-            __(SCALE * freq, '/cm').au,
-            __(SCALE * width_b, '/cm').au,
-            distr.function,
+            __(re_b / dof / (_n + 1), '/cm').au * scaling,
+            __(freq, '/cm').au * scaling,
+            __(width_b, '/cm').au * scaling,
         )
         sds.append(b)
     corr = Correlation(sds, distr)
+    corr.fix()
     print(corr)
 
     # HEOM settings:
@@ -61,27 +61,29 @@ def test_hierachy(out: str, elec_bias: float, elec_coupling: float, freq_max: fl
         s = TensorTreeEDT(rdo, dims, n_ary=2, rank=rank)
     elif htd_method == 'Tree3':
         s = TensorTreeEDT(rdo, dims, n_ary=3, rank=rank)
-    else:
+    elif htd_method == 'Naive':
         s = ExtendedDensityTensor(rdo, dims)
+    else:
+        raise NotImplementedError(f'No htd_method {htd_method}.')
 
     # Propagator settings:
     steps = int(end / dt) * callback_steps
-    interval = __(0.1 / SCALE / callback_steps, 'fs')
+    interval = __(dt / callback_steps, 'fs') / scaling
     propagator = Propagator(heom_op, s, interval.au, ode_method=ode_method, ps_method=ps_method, reg_method=reg_method)
     if dry_run:
-        print('Smoke testing...')
+        print('\nSmoke testing...')
         propagator.step()
         return
     else:
         if not out.endswith('.log'):
             out += '.log'
-        print(f'Write in `{out}`...')
+        print(f'\nWrite in `{out}`...')
         logger = Logger(filename=out, level='info').logger
         logger.info('# time rdo00 rdo01 rdo10 rdo11')
         cpu_time0 = time()
         for _n, _t in zip(range(steps), propagator):
             rdo = s.get_rdo()
-            t = _t * SCALE
+            t = _t * scaling
             logger.info(f'{t} {rdo[0, 0]} {rdo[0, 1]} {rdo[1, 0]} {rdo[1, 1]}')
 
             if _n % callback_steps == 0:
@@ -113,17 +115,17 @@ if __name__ == '__main__':
     parser.add_argument('--width_b', type=float, default=50.0)
     parser.add_argument('--dof', type=int, default=4)
     parser.add_argument('--n_ltc', type=int, default=3)
-    parser.add_argument('--heom_factor', type=float, default=2.0)
+    parser.add_argument('--heom_factor', type=float, default=1.0)
     parser.add_argument('--dim', type=int, default=10)
     parser.add_argument('--rank', type=int, default=20)
     parser.add_argument('--decomposition_method', type=str, default='Pade')
-    parser.add_argument('--htd_method', type=str, default='Train')
+    parser.add_argument('--htd_method', type=str, default='Tree2')
     parser.add_argument('--ps_method', type=str, default='vmf')
     parser.add_argument('--ode_method', type=str, default='dopri5')
     parser.add_argument('--reg_method', type=str, default='proper')
-    parser.add_argument('--ode_rtol', type=float, default=1.0e-6)
-    parser.add_argument('--ode_atol', type=float, default=1.0e-8)
-    parser.add_argument('--svd_atol', type=float, default=1.0e-8)
+    parser.add_argument('--ode_rtol', type=float, default=1.0e-5)
+    parser.add_argument('--ode_atol', type=float, default=1.0e-7)
+    parser.add_argument('--svd_atol', type=float, default=1.0e-7)
     parser.add_argument('--elec_coupling', type=float, default=0.0)
     parser.add_argument('--elec_bias', type=float, default=5000.0)
     parser.add_argument('--dt', type=float, default=0.1)
