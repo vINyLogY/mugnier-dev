@@ -165,7 +165,7 @@ class TensorTrainEDT(TensorTreeEDT):
             f.add_link(e_node, p_node)
             f.add_link(p_node, ends[0])
 
-        super(TensorTreeEDT).__init__(f, e_node)
+        super(TensorTreeEDT, self).__init__(f, e_node)
 
         _size = rank  # if rank < prod(shape) else prod(shape)
         ext = zeros((_size,))

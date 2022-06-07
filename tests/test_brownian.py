@@ -116,7 +116,7 @@ if __name__ == '__main__':
     parser.add_argument('--dim', type=int, default=10)
     parser.add_argument('--rank', type=int, default=40)
     parser.add_argument('--decomposition_method', type=str, default='Pade')
-    parser.add_argument('--htd_method', type=str, default='Tree2')
+    parser.add_argument('--htd_method', type=str, default='Train')
     parser.add_argument('--ps_method', type=str, default='vmf')
     parser.add_argument('--ode_method', type=str, default='dopri5')
     parser.add_argument('--reg_method', type=str, default='proper')
