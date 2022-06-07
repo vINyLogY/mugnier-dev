@@ -103,7 +103,6 @@ class BoseEinstein(object):
 
 
 class Correlation(object):
-    roundoff = 1.0e-8
 
     def __init__(self, spectral_densities: list[SpectralDensity], distribution: BoseEinstein) -> None:
         self.spectral_densities = spectral_densities
@@ -121,12 +120,12 @@ class Correlation(object):
         self.get_ltc()
         return
 
-    def fix(self) -> None:
+    def fix(self, roundoff) -> None:
         """Fix underflow in the coefficients."""
 
         def _fix(num: complex) -> complex:
-            re = 0.0 if abs(num.real) < self.roundoff else num.real
-            im = 0.0 if abs(num.imag) < self.roundoff else num.imag
+            re = 0.0 if abs(num.real) < roundoff else num.real
+            im = 0.0 if abs(num.imag) < roundoff else num.imag
             return re + 1.0j * im
 
         self.coefficients = list(map(_fix, self.coefficients))

@@ -3,6 +3,7 @@
 *.pdf
 *.log
 *.png
+launch.json
 
 ## Ref: https://github.com/github/gitignore
 # Byte-compiled / optimized / DLL files

@@ -35,7 +35,7 @@ def test_hierachy(out: str, elec_bias: float, elec_coupling: float, freq_max: fl
     # Bath settings:
     distr = BoseEinstein(n=n_ltc, beta=__(1 / temperature, '/K').au / scaling)
     distr.decomposition_method = decomposition_method
-    drude = Drude(__(re_d, '/cm').au / scaling, __(width_d, '/cm').au / scaling, distr.function)
+    drude = Drude(__(re_d, '/cm').au * scaling, __(width_d, '/cm').au * scaling)
     sds = [drude]  # type:list[SpectralDensity]
     freq_space = [freq_max / (dof + 1) * (n + 1) for n in range(dof)]
     for _n, freq in enumerate(freq_space):
@@ -82,18 +82,18 @@ def test_hierachy(out: str, elec_bias: float, elec_coupling: float, freq_max: fl
         logger.info('# time rdo00 rdo01 rdo10 rdo11')
         cpu_time0 = time()
         for _n, _t in zip(range(steps), propagator):
-            rdo = s.get_rdo()
-            t = _t * scaling
-            logger.info(f'{t} {rdo[0, 0]} {rdo[0, 1]} {rdo[1, 0]} {rdo[1, 1]}')
+            if (_n + 1) % callback_steps == 0:
+                rdo = s.get_rdo()
+                t = _t * scaling
+                logger.info(f'{t} {rdo[0, 0]} {rdo[0, 1]} {rdo[1, 0]} {rdo[1, 1]}')
 
-            if _n % callback_steps == 0:
                 trace = rdo[0, 0] + rdo[1, 1]
                 coh = abs(rdo[0, 1])
                 _steps = sum(propagator.ode_step_counter)
                 cpu_time = time()
                 info = f'[{cpu_time - cpu_time0:.3f} s] {__(t).convert_to("fs").value:.1f} fs | ODE steps:{_steps}'
                 info += f' | Tr:1{(trace.real - 1):+e}{trace.imag:+e}j | Coh:{coh:f}'
-                print(info)
+                print(info, flush=True)
                 cpu_time0 = cpu_time
                 propagator.ode_step_counter = []
                 if coh > 0.55:

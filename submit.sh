@@ -3,15 +3,10 @@
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=16G
-#SBATCH --time=4-00:00:00    # Time limit hrs:min:sec
+#SBATCH --time=1-00:00:00
 pwd; hostname; date
 
-if [ "$1" != "" ]; then
-    echo "Running $1"
-    ~/.conda/envs/mkl/bin/python ./tests/test_brownian.py --width $1
-else
-    echo "Parameter 1 required."
-fi
+~/.conda/envs/mkl/bin/python ./tests/test_dnb.py --width_b $1 --out $2
 
 date
 
