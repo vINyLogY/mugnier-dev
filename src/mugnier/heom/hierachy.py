@@ -102,7 +102,7 @@ class TensorTreeEDT(CannonialModel):
 
         args = [(tensor, list(range(order)))]
         args.extend((vec_list[i], [ax_list[i]]) for i in range(n))
-        ans_axes =  [ax for ax in range(order) if ax not in ax_list]
+        ans_axes = [ax for ax in range(order) if ax not in ax_list]
         args.append((ans_axes,))
 
         args = list(chain(*args))
@@ -119,7 +119,7 @@ class TensorTreeEDT(CannonialModel):
         # Iterative from leaves to root (not include)
         for p in reversed(self.visitor[1:]):
             term_dict = {i: terminators[q] for i, q in enumerate(near(p)) if i != axes[p]}
-            terminators[p]  = terminate(self[p], term_dict)
+            terminators[p] = terminate(self[p], term_dict)
 
         # root node: 0 and 1 observed for i and j
         term_dict = {i: terminators[q] for i, q in enumerate(near(root)) if i > 1}
@@ -127,7 +127,6 @@ class TensorTreeEDT(CannonialModel):
         array = terminate(self[root], term_dict)
         dim = array.shape[0]
         return array.reshape((dim, dim, -1))[:, :, 0]
-
 
 
 class TensorTrainEDT(TensorTreeEDT):
@@ -175,7 +174,9 @@ class TensorTrainEDT(TensorTreeEDT):
         dim_dct = {f.dual(e, 0): dims[i] for i, e in enumerate(ends)}
 
         self.fill_eyes(dims=dim_dct, default_dim=rank)
+        self.visitor = self.frame.node_visitor(self.root, method='BFS')
         return
+
 
 class Hierachy(SumProdOp):
     # ?
@@ -200,15 +201,20 @@ class Hierachy(SumProdOp):
         cck = self.conj_coefficents[k]
         dk = self.derivatives[k]
         fk = self.scaling_factor
+        dim = self.dims[k]
+
+        raiser = np.diag(np.sqrt(np.arange(1, dim, dtype=dtype)), k=-1)
+        lower = np.diag(np.sqrt(np.arange(1, dim, dtype=dtype)), k=1)
+        numberer = np.diag(arange(dim))
 
         return [{
-            _k: dk * self.numberer(k)
+            _k: dk * numberer
         }, {
             _end('i'): -1.0j * self.op,
-            _k: (ck / fk * self.raiser(k) + fk * self.lower(k))
+            _k: (ck / fk * raiser + fk * lower)
         }, {
             _end('j'): 1.0j * self.op.conj(),
-            _k: (cck / fk * self.raiser(k) + fk * self.lower(k))
+            _k: (cck / fk * raiser + fk * lower)
         }]
 
     @property
@@ -218,32 +224,10 @@ class Hierachy(SumProdOp):
             ans.extend(self.bcf_term(k))
         return ans
 
-    # def raiser(self, k: int) -> Array:
-    #     dim = self.dims[k]
-    #     return eye(dim, dim, k=-1)
-
-    # def lower(self, k: int) -> Array:
-    #     dim = self.dims[k]
-    #     return np.diag(np.arange(1, dim, dtype=dtype), k=1)
-
-    def raiser(self, k: int) -> Array:
-        dim = self.dims[k]
-        sub_diag = np.sqrt(np.arange(1, dim, dtype=dtype))
-        return np.diag(sub_diag, k=-1)
-
-    def lower(self, k: int) -> Array:
-        dim = self.dims[k]
-        sub_diag = np.sqrt(np.arange(1, dim, dtype=dtype))
-        return np.diag(sub_diag, k=1)
-
-    def numberer(self, k: int) -> Array:
-        dim = self.dims[k]
-        return np.diag(arange(dim))
-
 
 class SineExtendedDensityTensor(ExtendedDensityTensor):
 
-    def __init__(self, rdo: Array, spaces: list[Tuple[float, float, int]]) -> None:
+    def __init__(self, rdo: Array, spaces: dict[Tuple[float, float, int]]) -> None:
         bases = [SineDVR(*args) for args in spaces]
         dims = [b.n for b in bases]
         tfmats = [optimize(b.fock2dvr_mat) for b in bases]
@@ -268,35 +252,32 @@ class SineExtendedDensityTensor(ExtendedDensityTensor):
 class SineHierachy(Hierachy):
 
     def __init__(self, sys_hamiltonian: Array, sys_op: Array, correlation: Correlation,
-                 spaces: list[Tuple[float, float, int]]) -> None:
-        bases = [SineDVR(*args) for args in spaces]
+                 spaces: dict[int, Tuple[float, float, int]]) -> None:
+        bases = {i: SineDVR(*args) for i, args in spaces.items()}
         dims = [b.n for b in bases]
         self.bases = bases
         super().__init__(sys_hamiltonian, sys_op, correlation, dims)
         return
 
     def bcf_term(self, k: int) -> list[dict[End, Array]]:
+        if k in self.bases:
+            return super().bcf_term(k)
         _k = _end(k)
         ck = self.coefficients[k]
         cck = self.conj_coefficents[k]
         dk = self.derivatives[k]
         fk = np.sqrt((ck.real + cck.real) / 2.0)
 
+        raiser = self.bases[k].creation_mat
+        lower = self.bases[k].annihilation_mat
+        numberer = self.bases[k].numberer_mat
+
         return [{
-            _k: dk * self.numberer(k)
+            _k: dk * numberer
         }, {
             _end('i'): -1.0j * self.op,
-            _k: (ck / fk * self.raiser(k) + fk * self.lower(k))
+            _k: (ck / fk * raiser + fk * lower)
         }, {
             _end('j'): 1.0j * self.op.conj(),
-            _k: (cck / fk * self.raiser(k) + fk * self.lower(k))
+            _k: (cck / fk * raiser + fk * lower)
         }]
-
-    def raiser(self, k: int) -> Array:
-        return self.bases[k].creation_mat
-
-    def lower(self, k: int) -> Array:
-        return self.bases[k].annihilation_mat
-
-    def numberer(self, k: int) -> Array:
-        return self.bases[k].numberer_mat
