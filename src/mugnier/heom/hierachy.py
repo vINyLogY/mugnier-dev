@@ -5,14 +5,13 @@
 import enum
 from itertools import chain
 from math import prod, sqrt
-from typing import Tuple
 
 import torch
 from mugnier.basis.dvr import SineDVR
 
 from mugnier.heom.bath import Correlation
 from mugnier.libs.backend import MAX_EINSUM_AXES, Array, OptArray, arange, array, eye, np, opt_einsum, opt_tensordot, optimize, zeros, dtype
-from mugnier.libs.utils import huffman_tree
+from mugnier.libs.utils import huffman_tree, Optional
 from mugnier.operator.spo import SumProdOp
 from mugnier.state.frame import End, Frame, Node, Point
 from mugnier.state.model import CannonialModel
@@ -123,7 +122,7 @@ class TensorTreeEDT(CannonialModel):
 
         # root node: 0 and 1 observed for i and j
         term_dict = {i: terminators[q] for i, q in enumerate(near(root)) if i > 1}
-        print(torch.norm(term_dict[2]))
+        # print(torch.norm(term_dict[2]))
         array = terminate(self[root], term_dict)
         dim = array.shape[0]
         return array.reshape((dim, dim, -1))[:, :, 0]
@@ -131,7 +130,12 @@ class TensorTreeEDT(CannonialModel):
 
 class TensorTrainEDT(TensorTreeEDT):
 
-    def __init__(self, rdo: Array, dims: list[int], rank: int = 1, rev: bool = False) -> None:
+    def __init__(self,
+                 rdo: Array,
+                 dims: list[int],
+                 rank: int = 1,
+                 rev: bool = False,
+                 decimation_rate: Optional[int] = None) -> None:
         shape = list(rdo.shape)
         assert len(shape) == 2 and shape[0] == shape[1]
 
@@ -166,14 +170,22 @@ class TensorTrainEDT(TensorTreeEDT):
 
         super(TensorTreeEDT, self).__init__(f, e_node)
 
-        _size = rank  # if rank < prod(shape) else prod(shape)
-        ext = zeros((_size,))
+        dim_dct = {f.dual(e, 0): dims[i] for i, e in enumerate(ends)}
+        dim_dct[e_node, 0] = shape[0]
+        dim_dct[e_node, 1] = shape[1]
+        axes = self.axes
+        if decimation_rate is not None:
+            for node in reversed(f.node_visitor(e_node, 'BFS')):
+                ax = axes[node]
+                if ax is not None:
+                    dims = [dim_dct[node, i] for i in range(f.order(node)) if i != ax]
+                    dim_dct[f.dual(node, ax)] = max(prod(dims) // decimation_rate, rank)
+        self.fill_eyes(dims=dim_dct, default_dim=rank)
+
+        ext = zeros((dim_dct[e_node, 2],))
         ext[0] = 1.0
         array = np.tensordot(rdo, ext, axes=0)
         self[self.root] = array
-        dim_dct = {f.dual(e, 0): dims[i] for i, e in enumerate(ends)}
-
-        self.fill_eyes(dims=dim_dct, default_dim=rank)
         self.visitor = self.frame.node_visitor(self.root, method='BFS')
         return
 
@@ -224,10 +236,18 @@ class Hierachy(SumProdOp):
             ans.extend(self.bcf_term(k))
         return ans
 
+    # def raiser(self, k: int) -> Array:
+    #     dim = self.dims[k]
+    #     return eye(dim, dim, k=-1)
+
+    # def lower(self, k: int) -> Array:
+    #     dim = self.dims[k]
+    #     return np.diag(np.arange(1, dim, dtype=dtype), k=1)
+
 
 class SineExtendedDensityTensor(ExtendedDensityTensor):
 
-    def __init__(self, rdo: Array, spaces: dict[Tuple[float, float, int]]) -> None:
+    def __init__(self, rdo: Array, spaces: list[tuple[float, float, int]]) -> None:
         bases = [SineDVR(*args) for args in spaces]
         dims = [b.n for b in bases]
         tfmats = [optimize(b.fock2dvr_mat) for b in bases]
@@ -252,7 +272,7 @@ class SineExtendedDensityTensor(ExtendedDensityTensor):
 class SineHierachy(Hierachy):
 
     def __init__(self, sys_hamiltonian: Array, sys_op: Array, correlation: Correlation,
-                 spaces: dict[int, Tuple[float, float, int]]) -> None:
+                 spaces: dict[int, tuple[float, float, int]]) -> None:
         bases = {i: SineDVR(*args) for i, args in spaces.items()}
         dims = [b.n for b in bases]
         self.bases = bases
