@@ -175,6 +175,7 @@ class TensorTrainEDT(TensorTreeEDT):
         dim_dct = {f.dual(e, 0): dims[i] for i, e in enumerate(ends)}
 
         self.fill_eyes(dims=dim_dct, default_dim=rank)
+        self.visitor = self.frame.node_visitor(self.root, method='BFS')
         return
 
 class Hierachy(SumProdOp):
