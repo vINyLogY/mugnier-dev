@@ -14,31 +14,37 @@ from mugnier.libs.utils import count_calls
 # import opt_einsum as oe
 
 DOUBLE_PRECISION = True
-FORCE_CPU = False
+FORCE_CPU = True
 MAX_EINSUM_AXES = 52  # restrition from torch.einsum as of PyTorch 1.10
 PI = np.pi
 
 # Place to keep magic numbers
-class Tolerence:
+class Parameters:
     ode_rtol = 1.0e-5
     ode_atol = 1.0e-8
     svd_atol = 1.0e-8
 
+    if torch.cuda.is_available():
+        device = 'cuda'
+    else:
+        device = 'cpu'
+
     def __str__(self) -> str:
         string = f'ODE[{log10(self.ode_rtol):+.0f}]({log10(self.ode_atol):+.0f})'
-        string += f'SVD({log10(self.svd_atol):+.0f})'
+        string += f' | SVD({log10(self.svd_atol):+.0f})'
+        string += f' | Device:{self.device}'
         return string
 
-tol = Tolerence()
+parameters = Parameters()
 
 # CPU settings
 if DOUBLE_PRECISION:
     dtype = np.complex128
 else:
     dtype = np.complex64
-    tol.ode_rtol = 1.0e-3
-    tol.ode_atol = 1.0e-6
-    tol.svd_atol = 1.0e-6
+    parameters.ode_rtol = 1.0e-3
+    parameters.ode_atol = 1.0e-6
+    parameters.svd_atol = 1.0e-6
 Array = NDArray[dtype]
 
 
@@ -67,14 +73,6 @@ def eye(m: int, n: int, k: int = 0) -> Array:
 
 
 # GPU settings
-
-if FORCE_CPU:
-    device = 'cpu'
-elif torch.cuda.is_available():
-    device = 'cuda'
-else:
-    device = 'cpu'
-
 if DOUBLE_PRECISION:
     opt_dtype = torch.complex128
 else:
@@ -90,7 +88,7 @@ def opt_cat(tensors: list[OptArray]) -> OptArray:
 @torch.no_grad()
 def opt_eye_like(a: OptArray) -> OptArray:
     m, n = a.shape
-    return torch.eye(m, n, device=device)
+    return torch.eye(m, n, device=parameters.device)
 
 
 @torch.no_grad()
@@ -100,7 +98,7 @@ def opt_split(tensors: OptArray, size_list: list[int]) -> list[OptArray]:
 
 @torch.no_grad()
 def optimize(array: ArrayLike) -> OptArray:
-    ans = torch.tensor(array, dtype=opt_dtype, device=device)
+    ans = torch.tensor(array, dtype=opt_dtype, device=parameters.device)
     return ans
 
 
@@ -149,7 +147,7 @@ def opt_compressed_qr(a: OptArray,
 @torch.no_grad()
 def opt_svd(a: OptArray) -> Tuple[OptArray, OptArray]:
     u, s, vh = torch.linalg.svd(a, full_matrices=False)
-    reg = tol.svd_atol * torch.ones_like(s)
+    reg = parameters.svd_atol * torch.ones_like(s)
     s = torch.maximum(s, reg)
     s /= torch.sum(s)
     # print(s)
@@ -176,7 +174,7 @@ def opt_svd(a: OptArray) -> Tuple[OptArray, OptArray]:
 @torch.no_grad()
 def opt_regularized_qr(a: OptArray) -> Tuple[OptArray, OptArray]:
     q, r = torch.linalg.qr(a, mode='reduced')
-    reg = tol.svd_atol * torch.eye(r.shape[0], r.shape[1], device=device, dtype=opt_dtype)
+    reg = parameters.svd_atol * torch.eye(r.shape[0], r.shape[1], device=parameters.device, dtype=opt_dtype)
     r = torch.where(torch.abs(r) > torch.abs(reg), r, reg)
     return q, r
 
@@ -207,17 +205,17 @@ def odeint(func: Callable[[OptArray], OptArray], y0: OptArray, dt: float, method
         return torch.stack([y.real, y.imag])
 
     _y0 = torch.stack([y0.real, y0.imag])
-    _t = torch.tensor([0.0, dt], device=device)
+    _t = torch.tensor([0.0, dt], device=parameters.device)
     if method == 'BDF':
         y1 = torchdiffeq.odeint(_func, _y0, _t, method='scipy_solver', options={'solver': 'BDF'})
     else:
-        y1 = torchdiffeq.odeint(_func, _y0, _t, method=method, rtol=tol.ode_rtol, atol=tol.ode_atol)
+        y1 = torchdiffeq.odeint(_func, _y0, _t, method=method, rtol=parameters.ode_rtol, atol=parameters.ode_atol)
     return (y1[1][0] + 1.0j * y1[1][1]), _func.calls
 
 
 @torch.no_grad()
 def opt_pinv(a: OptArray) -> OptArray:
-    return torch.linalg.pinv(a, atol=tol.svd_atol)
+    return torch.linalg.pinv(a, atol=parameters.svd_atol)
 
 
 @torch.no_grad()

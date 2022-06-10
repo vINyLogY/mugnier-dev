@@ -191,6 +191,7 @@ class CannonialModel(Model):
                     for i in range(order(p))
                 ]
                 if ax is None:
+                    print(shape)
                     ans = zeros((prod(shape),))
                     ans[0] = 1.0
                     ans = ans.reshape(shape)
