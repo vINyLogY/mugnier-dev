@@ -137,11 +137,11 @@ class NaiveHierachy(Hierachy):
             dims: list[int],
             spaces: Optional[dict[int, tuple[float, float]]] = None) -> None:
         ends = [self.end('i'), self.end('j')] + [self.end(k) for k in range(len(dims))]
-        f = Frame()
+        frame = Frame()
         root = Node(f'0')
         for e in ends:
-            self.add_link(root, e)
-        super().__init__(rdo, dims, f, root, spaces=spaces)
+            frame.add_link(root, e)
+        super().__init__(rdo, dims, frame, root, spaces=spaces)
         return
 
 
