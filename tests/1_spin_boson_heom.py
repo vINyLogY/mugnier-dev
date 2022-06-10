@@ -26,7 +26,7 @@ if __name__ == '__main__':
     parser.add_argument('--re_b', type=float, default=1000.0)
     parser.add_argument('--width_b', type=float, default=50.0)
 
-    parser.add_argument('--temperature', type=float, default=300.0)
+    parser.add_argument('--temperature', type=float, default=100.0)
     parser.add_argument('--decomposition_method', type=str, default='Pade')
     parser.add_argument('--n_ltc', type=int, default=3)
 
@@ -37,7 +37,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--heom_factor', type=float, default=1.0)
     parser.add_argument('--ps_method', type=str, default='vmf')
-    parser.add_argument('--ode_method', type=str, default='dopri5')
+    parser.add_argument('--ode_method', type=str, default='bosh3')
     parser.add_argument('--reg_method', type=str, default='proper')
 
     parser.add_argument('--roundoff', type=float, default=1.0e-8)
@@ -45,7 +45,7 @@ if __name__ == '__main__':
     parser.add_argument('--ode_atol', type=float, default=1.0e-7)
     parser.add_argument('--svd_atol', type=float, default=1.0e-7)
 
-    parser.add_argument('--dt', type=float, default=0.1)
+    parser.add_argument('--dt', type=float, default=1.0)
     parser.add_argument('--end', type=float, default=100.0)
     parser.add_argument('--callback_steps', type=int, default=1)
 

@@ -3,18 +3,17 @@
 """
 
 from itertools import chain
-from math import prod, sqrt
+from math import prod
 from typing import Literal
 
 from mugnier.basis.dvr import SineDVR
 
 from mugnier.heom.bath import Correlation
-from mugnier.libs.backend import MAX_EINSUM_AXES, Array, OptArray, arange, array, eye, np, opt_einsum, opt_tensordot, optimize, zeros, dtype
+from mugnier.libs.backend import MAX_EINSUM_AXES, Array, OptArray, arange, np, opt_einsum, opt_tensordot, optimize, zeros, dtype
 from mugnier.libs.utils import huffman_tree, Optional
 from mugnier.operator.spo import SumProdOp
 from mugnier.state.frame import End, Frame, Node, Point
 from mugnier.state.model import CannonialModel
-from mugnier.state.template import Singleton
 
 
 class Hierachy(CannonialModel):
@@ -132,24 +131,30 @@ class Hierachy(CannonialModel):
 
 class NaiveHierachy(Hierachy):
 
-    def __init__(self, rdo: Array, dims: list[int]) -> None:
+    def __init__(
+            self,
+            rdo: Array,
+            dims: list[int],
+            spaces: Optional[dict[int, tuple[float, float]]] = None) -> None:
         ends = [self.end('i'), self.end('j')] + [self.end(k) for k in range(len(dims))]
         f = Frame()
         root = Node(f'0')
         for e in ends:
             self.add_link(root, e)
-        super().__init__(rdo, dims, f, root)
+        super().__init__(rdo, dims, f, root, spaces=spaces)
         return
 
 
 class TreeHierachy(Hierachy):
 
-    def __init__(self,
-                 rdo: Array,
-                 dims: list[int],
-                 n_ary=2,
-                 rank: int = 1,
-                 decimation_rate: Optional[int] = None) -> None:
+    def __init__(
+            self,
+            rdo: Array,
+            dims: list[int],
+            n_ary=2,
+            rank: int = 1,
+            decimation_rate: Optional[int] = None,
+            spaces: Optional[dict[int, tuple[float, float]]] = None) -> None:
         p_ends = [self.end(k) for k in range(len(dims))]
         frame = Frame()
         e_node = Node('Elec')
@@ -171,18 +176,26 @@ class TreeHierachy(Hierachy):
             for child in children:
                 frame.add_link(n, child)
 
-        super().__init__(rdo, dims, frame, e_node, rank=rank, decimation_rate=decimation_rate)
+        super().__init__(rdo,
+                         dims,
+                         frame,
+                         e_node,
+                         rank=rank,
+                         decimation_rate=decimation_rate,
+                         spaces=spaces)
         return
 
 
 class TrainHierachy(Hierachy):
 
-    def __init__(self,
-                 rdo: Array,
-                 dims: list[int],
-                 rev: bool = False,
-                 rank: int = 1,
-                 decimation_rate: Optional[int] = None) -> None:
+    def __init__(
+            self,
+            rdo: Array,
+            dims: list[int],
+            rev: bool = False,
+            rank: int = 1,
+            decimation_rate: Optional[int] = None,
+            spaces: Optional[dict[int, tuple[float, float]]] = None) -> None:
 
         if rev:
             p_ends = [self.end(k) for k in reversed(range(len(dims)))]
@@ -207,7 +220,13 @@ class TrainHierachy(Hierachy):
             frame.add_link(e_node, p_node)
             frame.add_link(p_node, p_ends[0])
 
-        super().__init__(rdo, dims, frame, e_node, rank, decimation_rate)
+        super().__init__(rdo,
+                         dims,
+                         frame,
+                         e_node,
+                         rank=rank,
+                         decimation_rate=decimation_rate,
+                         spaces=spaces)
         return
 
 
