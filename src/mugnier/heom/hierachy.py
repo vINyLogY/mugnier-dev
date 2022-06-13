@@ -2,93 +2,93 @@
 """Generating the derivative of the extended rho in SoP formalism.
 """
 
-import enum
 from itertools import chain
-from math import prod, sqrt
-from typing import Tuple
+from math import prod
+from typing import Literal
 
-import torch
 from mugnier.basis.dvr import SineDVR
 
 from mugnier.heom.bath import Correlation
-from mugnier.libs.backend import MAX_EINSUM_AXES, Array, OptArray, arange, array, eye, np, opt_einsum, opt_tensordot, optimize, zeros, dtype
-from mugnier.libs.utils import huffman_tree
+from mugnier.libs.backend import MAX_EINSUM_AXES, Array, OptArray, arange, np, opt_einsum, opt_tensordot, optimize, zeros, dtype
+from mugnier.libs.utils import huffman_tree, Optional
 from mugnier.operator.spo import SumProdOp
 from mugnier.state.frame import End, Frame, Node, Point
 from mugnier.state.model import CannonialModel
-from mugnier.state.template import Singleton
 
 
-def _end(identifier: ...) -> End:
-    return End(f'HEOM-{identifier}')
+class Hierachy(CannonialModel):
 
+    @staticmethod
+    def end( identifier: Literal['i', 'j'] | int) -> End:
+        return End(f'[HEOM]{identifier}')
 
-class ExtendedDensityTensor(CannonialModel):
+    @staticmethod
+    def node(identifier: ...) -> Node:
+        return Node(f'[HEOM]{identifier}')
 
-    def __init__(self, rdo: Array, dims: list[int]) -> None:
+    def __init__(self,
+                 rdo: Array,
+                 dims: list[int],
+                 frame: Frame,
+                 root: Node,
+                 rank: int = 1,
+                 decimation_rate: Optional[int] = None,
+                 spaces: Optional[dict[int, tuple[float, float]]] = None) -> None:
+
         shape = list(rdo.shape)
         assert len(shape) == 2 and shape[0] == shape[1]
+        all_dims = shape + dims
+        e_ends = [self.end('i'), self.end('j')]
+        p_ends = [self.end(k) for k in range(len(dims))]
+        all_ends = e_ends + p_ends
 
-        ends = [_end('i'), _end('j')] + [_end(k) for k in range(len(dims))]
-        f = Singleton(ends)
-        super().__init__(f, f.root)
+        assert root in frame.nodes
+        assert frame.dual(root, 0)[0] == e_ends[0]
+        assert frame.dual(root, 1)[0] == e_ends[1]
+        assert set(all_ends) == frame.ends
+        super().__init__(frame, root)
 
-        ext = zeros((prod(dims),))
-        ext[0] = 1.0
-        array = np.tensordot(rdo, ext, axes=0).reshape(shape + dims)
-        self[self.root] = array
-        return
+        dim_dct = {frame.dual(e, 0): d for d, e in zip(all_dims, all_ends)}
+        axes = self.axes
+        if decimation_rate is not None:
+            for node in reversed(frame.node_visitor(root, 'BFS')):
+                ax = axes[node]
+                if ax is not None:
+                    _ds = [dim_dct[node, i] for i in range(frame.order(node)) if i != ax]
+                    dim_dct[frame.dual(node, ax)] = max(prod(_ds) // decimation_rate, rank)
+        self.fill_eyes(dims=dim_dct, default_dim=rank)
 
-    def get_rdo(self) -> OptArray:
-        array = self[self.root]
-        dim = array.shape[0]
-        return array.reshape((dim, dim, -1))[:, :, 0]
-
-
-class TensorTreeEDT(CannonialModel):
-
-    def __init__(self, rdo: Array, dims: list[int], n_ary=2, rank: int = 1) -> None:
-        shape = list(rdo.shape)
-        assert len(shape) == 2 and shape[0] == shape[1]
-
-        ends = [_end(k) for k in range(len(dims))]
-        self.terminators = {}  # type: dict[Point, OptArray]
-        for k, d in enumerate(dims):
-            tm = zeros([d])
-            tm[0] = 1.0
-            self.terminators[_end(k)] = optimize(tm)
-
-        f = Frame()
-        e_node = Node('Elec')
-        f.add_link(e_node, _end('i'))
-        f.add_link(e_node, _end('j'))
-
-        class new_node(Node):
-            _counter = 0
-
-            def __init__(self) -> None:
-                cls = type(self)
-                super().__init__(f'T{cls._counter}')
-                cls._counter += 1
-
-        importances = list(reversed(range(len(dims))))
-        graph, p_node = huffman_tree(ends, new_node, importances=importances, n_ary=n_ary)
-        f.add_link(e_node, p_node)
-        for n, children in graph.items():
-            for child in children:
-                f.add_link(n, child)
-
-        super().__init__(f, e_node)
-
-        _size = rank  # if rank < prod(shape) else prod(shape)
-        ext = zeros((_size,))
+        ext_shape = [k for i, k in enumerate(self.shape(root)) if i > 1]
+        ext = zeros([prod(ext_shape)])
         ext[0] = 1.0
         array = np.tensordot(rdo, ext, axes=0)
-        self[self.root] = array
-        dim_dct = {f.dual(e, 0): dims[i] for i, e in enumerate(ends)}
+        self[root] = array
 
-        self.fill_eyes(dims=dim_dct, default_dim=rank)
-        self.visitor = self.frame.node_visitor(self.root, method='BFS')
+        # QFPE for defined k
+        self.bases = dict()  # type: dict[End, SineDVR]
+        tfmats = dict()  #type: dict[End, OptArray]
+        if spaces is not None:
+            for k, (x0, x1) in spaces:
+                b = SineDVR(x0, x1, dims[k])
+                tfmats[p_ends[k]] = optimize(b.fock2dvr_mat)
+                self.bases[p_ends[k]] = b
+
+            for _q, tfmat in tfmats.items():
+                _p, _i = frame.dual(_q, 0)
+                _a = opt_tensordot(self[_p], tfmat, ([_i], [1])).moveaxis(-1, _i)
+                self.opt_update(_p, _a)
+
+        # add terminators
+        self.terminators = {}  # type: dict[Point, OptArray]
+        for _k, d in zip(p_ends, dims):
+            if _k in tfmats:
+                tm = (tfmats[_k].mH)[0]
+            else:
+                tm = zeros([d])
+                tm[0] = 1.0
+                tm = optimize(tm)
+            self.terminators[_k] = tm
+        self.bfs_visitor = self.frame.node_visitor(root, method='BFS')
         return
 
     @staticmethod
@@ -117,76 +117,129 @@ class TensorTreeEDT(CannonialModel):
         near = self.frame.near_points
 
         # Iterative from leaves to root (not include)
-        for p in reversed(self.visitor[1:]):
+        for p in reversed(self.bfs_visitor[1:]):
             term_dict = {i: terminators[q] for i, q in enumerate(near(p)) if i != axes[p]}
             terminators[p] = terminate(self[p], term_dict)
 
         # root node: 0 and 1 observed for i and j
         term_dict = {i: terminators[q] for i, q in enumerate(near(root)) if i > 1}
-        print(torch.norm(term_dict[2]))
+        # print(torch.norm(term_dict[2]))
         array = terminate(self[root], term_dict)
         dim = array.shape[0]
         return array.reshape((dim, dim, -1))[:, :, 0]
 
 
-class TensorTrainEDT(TensorTreeEDT):
+class NaiveHierachy(Hierachy):
 
-    def __init__(self, rdo: Array, dims: list[int], rank: int = 1, rev: bool = False) -> None:
-        shape = list(rdo.shape)
-        assert len(shape) == 2 and shape[0] == shape[1]
-
-        if rev:
-            ends = [_end(k) for k in reversed(range(len(dims)))]
-        else:
-            ends = [_end(k) for k in range(len(dims))]
-        self.terminators = {}  # type: dict[Point, OptArray]
-        for k, d in enumerate(dims):
-            tm = zeros([d])
-            tm[0] = 1.0
-            self.terminators[_end(k)] = optimize(tm)
-
-        f = Frame()
-        dof = len(dims)
-        e_node = Node('Elec')
-        f.add_link(e_node, _end('i'))
-        f.add_link(e_node, _end('j'))
-        p_nodes = [Node(f'{i}') for i in range(dof - 1)]
-        if p_nodes:
-            f.add_link(e_node, p_nodes[0])
-            for n in range(dof - 1):
-                f.add_link(p_nodes[n], ends[n])
-                if n + 1 < dof - 1:
-                    f.add_link(p_nodes[n], p_nodes[n + 1])
-            f.add_link(p_nodes[-1], ends[-1])
-
-        else:
-            p_node = Node('0')
-            f.add_link(e_node, p_node)
-            f.add_link(p_node, ends[0])
-
-        super(TensorTreeEDT, self).__init__(f, e_node)
-
-        _size = rank  # if rank < prod(shape) else prod(shape)
-        ext = zeros((_size,))
-        ext[0] = 1.0
-        array = np.tensordot(rdo, ext, axes=0)
-        self[self.root] = array
-        dim_dct = {f.dual(e, 0): dims[i] for i, e in enumerate(ends)}
-
-        self.fill_eyes(dims=dim_dct, default_dim=rank)
-        self.visitor = self.frame.node_visitor(self.root, method='BFS')
+    def __init__(
+            self,
+            rdo: Array,
+            dims: list[int],
+            spaces: Optional[dict[int, tuple[float, float]]] = None) -> None:
+        ends = [self.end('i'), self.end('j')] + [self.end(k) for k in range(len(dims))]
+        frame = Frame()
+        root = Node(f'0')
+        for e in ends:
+            frame.add_link(root, e)
+        super().__init__(rdo, dims, frame, root, spaces=spaces)
         return
 
 
-class Hierachy(SumProdOp):
+class TreeHierachy(Hierachy):
+
+    def __init__(
+            self,
+            rdo: Array,
+            dims: list[int],
+            n_ary=2,
+            rank: int = 1,
+            decimation_rate: Optional[int] = None,
+            spaces: Optional[dict[int, tuple[float, float]]] = None) -> None:
+        p_ends = [self.end(k) for k in range(len(dims))]
+        frame = Frame()
+        e_node = Node('Elec')
+        frame.add_link(e_node, self.end('i'))
+        frame.add_link(e_node, self.end('j'))
+
+        class new_node(Node):
+            _counter = 0
+
+            def __init__(self) -> None:
+                cls = type(self)
+                super().__init__(f'T{cls._counter}')
+                cls._counter += 1
+
+        importances = list(reversed(range(len(dims))))
+        graph, p_node = huffman_tree(p_ends, new_node, importances=importances, n_ary=n_ary)
+        frame.add_link(e_node, p_node)
+        for n, children in graph.items():
+            for child in children:
+                frame.add_link(n, child)
+
+        super().__init__(rdo,
+                         dims,
+                         frame,
+                         e_node,
+                         rank=rank,
+                         decimation_rate=decimation_rate,
+                         spaces=spaces)
+        return
+
+
+class TrainHierachy(Hierachy):
+
+    def __init__(
+            self,
+            rdo: Array,
+            dims: list[int],
+            rev: bool = False,
+            rank: int = 1,
+            decimation_rate: Optional[int] = None,
+            spaces: Optional[dict[int, tuple[float, float]]] = None) -> None:
+
+        if rev:
+            p_ends = [self.end(k) for k in reversed(range(len(dims)))]
+        else:
+            p_ends = [self.end(k) for k in range(len(dims))]
+
+        frame = Frame()
+        dof = len(dims)
+        e_node = Node('Elec')
+        frame.add_link(e_node, self.end('i'))
+        frame.add_link(e_node, self.end('j'))
+        p_nodes = [Node(f'{i}') for i in range(dof - 1)]
+        if p_nodes:
+            frame.add_link(e_node, p_nodes[0])
+            for n in range(dof - 1):
+                frame.add_link(p_nodes[n], p_ends[n])
+                if n + 1 < dof - 1:
+                    frame.add_link(p_nodes[n], p_nodes[n + 1])
+            frame.add_link(p_nodes[-1], p_ends[-1])
+        else:
+            p_node = Node('0')
+            frame.add_link(e_node, p_node)
+            frame.add_link(p_node, p_ends[0])
+
+        super().__init__(rdo,
+                         dims,
+                         frame,
+                         e_node,
+                         rank=rank,
+                         decimation_rate=decimation_rate,
+                         spaces=spaces)
+        return
+
+
+class HeomOp(SumProdOp):
     # ?
     scaling_factor = 2
 
-    def __init__(self, sys_hamiltonian: Array, sys_op: Array, correlation: Correlation, dims: list[int]) -> None:
-
+    def __init__(self, hierachy: Hierachy, sys_hamiltonian: Array, sys_op: Array, correlation: Correlation,
+                 dims: list[int]) -> None:
+        self.bases = hierachy.bases
+        self.end = hierachy.end
         self.h = sys_hamiltonian
         self.op = sys_op
-
         self.coefficients = correlation.coefficients
         self.conj_coefficents = correlation.conj_coefficents
         self.derivatives = correlation.derivatives
@@ -195,89 +248,37 @@ class Hierachy(SumProdOp):
         super().__init__(self.op_list)
         return
 
-    def bcf_term(self, k: int) -> list[dict[End, Array]]:
-        _k = _end(k)
-        ck = self.coefficients[k]
-        cck = self.conj_coefficents[k]
-        dk = self.derivatives[k]
-        fk = self.scaling_factor
-        dim = self.dims[k]
-
-        raiser = np.diag(np.sqrt(np.arange(1, dim, dtype=dtype)), k=-1)
-        lower = np.diag(np.sqrt(np.arange(1, dim, dtype=dtype)), k=1)
-        numberer = np.diag(arange(dim))
-
-        return [{
-            _k: dk * numberer
-        }, {
-            _end('i'): -1.0j * self.op,
-            _k: (ck / fk * raiser + fk * lower)
-        }, {
-            _end('j'): 1.0j * self.op.conj(),
-            _k: (cck / fk * raiser + fk * lower)
-        }]
-
     @property
     def op_list(self) -> list[dict[End, Array]]:
-        ans = [{_end('i'): -1.0j * self.h}, {_end('j'): 1.0j * self.h.conj()}]
+        ans = [{self.end('i'): -1.0j * self.h}, {self.end('j'): 1.0j * self.h.conj()}]
         for k in range(len(self.dims)):
             ans.extend(self.bcf_term(k))
         return ans
 
-
-class SineExtendedDensityTensor(ExtendedDensityTensor):
-
-    def __init__(self, rdo: Array, spaces: dict[Tuple[float, float, int]]) -> None:
-        bases = [SineDVR(*args) for args in spaces]
-        dims = [b.n for b in bases]
-        tfmats = [optimize(b.fock2dvr_mat) for b in bases]
-        super().__init__(rdo, dims)
-
-        array = self[self.root]
-        for i, tfmat in enumerate(tfmats):
-            array = opt_tensordot(array, tfmat, ([i + 2], [1])).moveaxis(-1, i + 2)
-        self.opt_update(self.root, array)
-
-        self.tfmats = tfmats
-        return
-
-    def get_rdo(self) -> OptArray:
-        array = self[self.root]
-        dim = array.shape[0]
-        for i, tfmat in enumerate(self.tfmats):
-            array = opt_tensordot(array, tfmat.T, ([i + 2], [1])).moveaxis(-1, i + 2)
-        return array.reshape((dim, dim, -1))[:, :, 0]
-
-
-class SineHierachy(Hierachy):
-
-    def __init__(self, sys_hamiltonian: Array, sys_op: Array, correlation: Correlation,
-                 spaces: dict[int, Tuple[float, float, int]]) -> None:
-        bases = {i: SineDVR(*args) for i, args in spaces.items()}
-        dims = [b.n for b in bases]
-        self.bases = bases
-        super().__init__(sys_hamiltonian, sys_op, correlation, dims)
-        return
-
     def bcf_term(self, k: int) -> list[dict[End, Array]]:
-        if k in self.bases:
-            return super().bcf_term(k)
-        _k = _end(k)
+        _k = self.end(k)
         ck = self.coefficients[k]
         cck = self.conj_coefficents[k]
         dk = self.derivatives[k]
-        fk = np.sqrt((ck.real + cck.real) / 2.0)
+        if k in self.bases:
+            fk = np.sqrt((ck.real + cck.real) / 2.0)
+            raiser = self.bases[k].creation_mat
+            lower = self.bases[k].annihilation_mat
+            numberer = self.bases[k].numberer_mat
+        else:
+            fk = self.scaling_factor
+            dim = self.dims[k]
+            raiser = np.diag(np.sqrt(np.arange(1, dim, dtype=dtype)), k=-1)
+            lower = np.diag(np.sqrt(np.arange(1, dim, dtype=dtype)), k=1)
+            numberer = np.diag(arange(dim))
 
-        raiser = self.bases[k].creation_mat
-        lower = self.bases[k].annihilation_mat
-        numberer = self.bases[k].numberer_mat
-
-        return [{
+        ans = [{
             _k: dk * numberer
         }, {
-            _end('i'): -1.0j * self.op,
+            self.end('i'): -1.0j * self.op,
             _k: (ck / fk * raiser + fk * lower)
         }, {
-            _end('j'): 1.0j * self.op.conj(),
+            self.end('j'): 1.0j * self.op.conj(),
             _k: (cck / fk * raiser + fk * lower)
         }]
+        return ans
