@@ -641,7 +641,6 @@ class Propagator:
         depths = self._depths
         move2 = self._move2
         move1 = self._move1
-        tol = self.tol
 
         it = self._node_link_visitor
         end = len(it) - 1
@@ -650,7 +649,7 @@ class Propagator:
             if depths[p] < depths[q]:
                 move1(i, op=self._ps1_mid_op(p, i, q, j, None))
             else:
-                move2(i, op=self._ps2_mid_op(p, i, q, j, ratio), tol=tol)
+                move2(i, op=self._ps2_mid_op(p, i, q, j, ratio))
                 self.eom.mean_fields[q, j] = self.eom._mean_field_with_node(p, i)
                 del self.eom.mean_fields[p, i]
                 if n != end:
@@ -661,7 +660,6 @@ class Propagator:
         depths = self._depths
         move2 = self._move2
         move1 = self._move1
-        tol = self.tol
 
         it = reversed(self._node_link_visitor)
         for n, (q, j, p, i) in enumerate(it):
@@ -669,7 +667,7 @@ class Propagator:
             if depths[p] < depths[q]:
                 if n != 0:
                     self._node_step(p, -ratio)
-                move2(i, op=self._ps2_mid_op(p, i, q, j, ratio), tol=tol)
+                move2(i, op=self._ps2_mid_op(p, i, q, j, ratio))
                 self.eom.mean_fields[q, j] = self.eom._mean_field_with_node(p, i)
                 del self.eom.mean_fields[p, i]
             else:

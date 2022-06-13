@@ -14,7 +14,7 @@ from mugnier.libs.utils import count_calls
 # import opt_einsum as oe
 
 DOUBLE_PRECISION = True
-FORCE_CPU = True
+FORCE_CPU = False
 MAX_EINSUM_AXES = 52  # restrition from torch.einsum as of PyTorch 1.10
 PI = np.pi
 
@@ -24,7 +24,9 @@ class Parameters:
     ode_atol = 1.0e-8
     svd_atol = 1.0e-8
 
-    if torch.cuda.is_available():
+    if FORCE_CPU:
+        device = 'cpu'
+    elif torch.cuda.is_available():
         device = 'cuda'
     else:
         device = 'cpu'
@@ -119,26 +121,26 @@ def opt_tensordot(a: OptArray, b: OptArray, axes: Tuple[list[int], list[int]]) -
 
 @torch.no_grad()
 def opt_compressed_qr(a: OptArray,
-                      rank: Optional[int] = None,
-                      tol: Optional[float] = None) -> Tuple[OptArray, OptArray]:
+                      rank: Optional[int] = None) -> Tuple[OptArray, OptArray]:
     u, s, vh = torch.linalg.svd(a, full_matrices=False)
 
     # Calculate rank from atol
-    if tol is not None:
-        total_error = 0.0
-        for n, s_i in reversed(list(enumerate(s))):
-            total_error += s_i
-            if total_error > tol:
-                rank = n + 1
-                break
-        # default
-        if rank is None:
-            rank = 1
+    tol = parameters.svd_atol
+    total_error = 0.0
+    for n, s_i in reversed(list(enumerate(s))):
+        total_error += s_i
+        if total_error > tol:
+            rank = n + 1
+            break
+    # default
+    if rank is None:
+        rank = 1
 
     if rank is not None and rank <= len(s):
         s = s[:rank]
         u = u[:, :rank]
         vh = vh[:rank, :]
+        s /= torch.sum(s)
     ss = s.diag().to(opt_dtype)
 
     return u, ss @ vh

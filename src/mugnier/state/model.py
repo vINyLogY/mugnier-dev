@@ -191,7 +191,6 @@ class CannonialModel(Model):
                     for i in range(order(p))
                 ]
                 if ax is None:
-                    print(shape)
                     ans = zeros((prod(shape),))
                     ans[0] = 1.0
                     ans = ans.reshape(shape)
@@ -214,8 +213,7 @@ class CannonialModel(Model):
     def split_unite_move(self,
                          i: int,
                          op: Optional[Callable[[OptArray], OptArray]] = None,
-                         rank: Optional[int] = None,
-                         tol: Optional[float] = None) -> None:
+                         rank: Optional[int] = None) -> None:
         m = self.root
         assert i < self.frame.order(m)
 
@@ -225,7 +223,7 @@ class CannonialModel(Model):
         shape.pop(i)
 
         mat_m = self[m].moveaxis(i, -1).reshape((-1, dim))
-        q, mid = opt_compressed_qr(mat_m, rank, tol)
+        q, mid = opt_compressed_qr(mat_m, rank)
         array_m = q.reshape(shape + [-1]).moveaxis(-1, i)
         self.opt_update(m, array_m)
         self.root = n
@@ -240,8 +238,7 @@ class CannonialModel(Model):
     def unite_split_move(self,
                          i: int,
                          op: Optional[Callable[[OptArray], OptArray]] = None,
-                         rank: Optional[int] = None,
-                         tol: Optional[float] = None) -> None:
+                         rank: Optional[int] = None) -> None:
         m = self.root
         assert i < self.frame.order(m)
 
@@ -255,7 +252,7 @@ class CannonialModel(Model):
         if op is not None:
             mid = op(mid)
 
-        q, r = opt_compressed_qr(mid.reshape((prod(shape_m), prod(shape_n))), rank, tol)
+        q, r = opt_compressed_qr(mid.reshape((prod(shape_m), prod(shape_n))), rank)
         array_m = q.reshape(shape_m + [-1]).moveaxis(-1, i)
         self.opt_update(m, array_m)
         self.root = n

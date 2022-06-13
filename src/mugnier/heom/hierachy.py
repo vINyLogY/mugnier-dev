@@ -61,14 +61,14 @@ class Hierachy(CannonialModel):
         ext_shape = [k for i, k in enumerate(self.shape(root)) if i > 1]
         ext = zeros([prod(ext_shape)])
         ext[0] = 1.0
-        array = np.tensordot(rdo, ext, axes=0)
+        array = np.tensordot(rdo, ext, axes=0).reshape(self.shape(root))
         self[root] = array
 
         # QFPE for defined k
         self.bases = dict()  # type: dict[End, SineDVR]
         tfmats = dict()  #type: dict[End, OptArray]
         if spaces is not None:
-            for k, (x0, x1) in spaces:
+            for k, (x0, x1) in spaces.items():
                 b = SineDVR(x0, x1, dims[k])
                 tfmats[p_ends[k]] = optimize(b.fock2dvr_mat)
                 self.bases[p_ends[k]] = b
