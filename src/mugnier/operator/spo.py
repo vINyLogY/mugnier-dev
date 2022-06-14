@@ -5,8 +5,10 @@ from math import prod
 from typing import Callable, Generator, Literal, Optional, Tuple
 
 import numpy as np
-from mugnier.libs.backend import (MAX_EINSUM_AXES, Array, OptArray, eye, odeint, opt_einsum, opt_inv, opt_pinv,
-                                  opt_regularized_qr, opt_sum, opt_svd, opt_tensordot, optimize, opt_cat, opt_split)
+from mugnier.libs.backend import (MAX_EINSUM_AXES, Array, OptArray, eye, odeint,
+                                  opt_einsum, opt_inv, opt_pinv,
+                                  opt_regularized_qr, opt_sum, opt_svd,
+                                  opt_tensordot, optimize, opt_cat, opt_split)
 from mugnier.state.frame import End, Node
 from mugnier.state.model import CannonialModel
 
@@ -34,7 +36,9 @@ class SumProdOp:
 
         self.n_terms = n_terms
         self.dims = dims  # type: dict[End, int]
-        self._valuation = {e: optimize(np.stack(a, axis=0)) for e, a in tensors.items()}  # type: dict[End, OptArray]
+        self._valuation = {
+            e: optimize(np.stack(a, axis=0)) for e, a in tensors.items()
+        }  # type: dict[End, OptArray]
         return
 
     def __getitem__(self, key: End) -> OptArray:
@@ -59,12 +63,17 @@ class SumProdOp:
         op_ax = order + n
         assert op_ax < MAX_EINSUM_AXES
 
-        ax_list = list(sorted(op_dict.keys(), key=(lambda ax: tensors.shape[ax + 1])))
+        ax_list = list(
+            sorted(op_dict.keys(), key=(lambda ax: tensors.shape[ax + 1])))
         mat_list = [op_dict[ax] for ax in ax_list]
 
         args = [(tensors, [op_ax] + list(range(order)))]
-        args.extend((mat_list[i], [op_ax, order + i, ax_list[i]]) for i in range(n))
-        ans_axes = [op_ax] + [order + ax_list.index(ax) if ax in ax_list else ax for ax in range(order)]
+        args.extend(
+            (mat_list[i], [op_ax, order + i, ax_list[i]]) for i in range(n))
+        ans_axes = [op_ax] + [
+            order + ax_list.index(ax) if ax in ax_list else ax
+            for ax in range(order)
+        ]
         args.append((ans_axes,))
 
         args = list(chain(*args))
@@ -85,7 +94,8 @@ class SumProdOp:
         axes1[ax] = i_ax
         axes2 = list(range(order))
         axes2[ax] = j_ax
-        return opt_einsum(tensors1, [op_ax] + axes1, tensors2, [op_ax] + axes2, [op_ax, i_ax, j_ax])
+        return opt_einsum(tensors1, [op_ax] + axes1, tensors2, [op_ax] + axes2,
+                          [op_ax, i_ax, j_ax])
 
 
 class MasterEqn(object):
@@ -100,13 +110,17 @@ class MasterEqn(object):
         n = len(op_dict)
         assert order + n - 1 < MAX_EINSUM_AXES
 
-        ax_list = list(sorted(op_dict.keys(), key=(lambda ax: tensor.shape[ax])))
+        ax_list = list(sorted(op_dict.keys(),
+                              key=(lambda ax: tensor.shape[ax])))
         # ax_list = list(sorted(op_dict.keys()))
         mat_list = [op_dict[ax] for ax in ax_list]
 
         args = [(tensor, list(range(order)))]
         args.extend((mat_list[i], [order + i, ax_list[i]]) for i in range(n))
-        ans_axes = [order + ax_list.index(ax) if ax in ax_list else ax for ax in range(order)]
+        ans_axes = [
+            order + ax_list.index(ax) if ax in ax_list else ax
+            for ax in range(order)
+        ]
         args.append((ans_axes,))
 
         ans = opt_einsum(*chain(*args))
@@ -145,7 +159,8 @@ class MasterEqn(object):
         for q in state.ends:
             p, i = dual(q, 0)
             self.mean_fields[(p, i)] = self.op[q]
-        self._node_visitor = state.frame.node_visitor(start=state.root, method='BFS')
+        self._node_visitor = state.frame.node_visitor(start=state.root,
+                                                      method='BFS')
         self._shape_list = [state.shape(p) for p in self._node_visitor]
         self._size_list = [prod(s) for s in self._shape_list]
         return
@@ -166,7 +181,9 @@ class MasterEqn(object):
             update(p, a)
         return
 
-    def vector_reg_eom(self, fast: bool = False, use_qr=False) -> Callable[[OptArray], OptArray]:
+    def vector_reg_eom(self,
+                       fast: bool = False,
+                       use_qr=False) -> Callable[[OptArray], OptArray]:
         axes = self.state.axes
         order_of = self.state.frame.order
         expand = self.op.expand
@@ -196,13 +213,16 @@ class MasterEqn(object):
                 ax = axes[p]
                 assert a.ndim == order
 
-                op_list = {i: self.mean_fields[p, i] for i in range(order) if i != ax}
+                op_list = {
+                    i: self.mean_fields[p, i] for i in range(order) if i != ax
+                }
                 if ax is not None:
                     # Inversion
                     if use_qr:
                         op_list[ax] = opt_inv(self._reg_r[p]) @ self._reg[p]
                     else:
-                        op_list[ax] = self._reg_v[p].mH @ (1.0 / self._reg_s[p]).diag() @ self._reg[p]
+                        op_list[ax] = self._reg_v[p].mH @ (
+                            1.0 / self._reg_s[p]).diag() @ self._reg[p]
 
                 ans = reduce(transforms(expand(a), op_list))
                 if ax is not None:
@@ -251,31 +271,6 @@ class MasterEqn(object):
 
         return _dd
 
-    def node_reg_eom(self, node: Node) -> Callable[[OptArray], OptArray]:
-        ax = self.state.axes[node]
-        order = self.state.frame.order(node)
-        expand = self.op.expand
-        transforms = self.op.transforms
-        reduce = self.op.reduce
-        transform = self.transform
-        trace = self.trace
-
-        op_list = {i: self.mean_fields[node, i] for i in range(order) if i != ax}
-        if ax is not None:
-            # Inversion
-            op_list[ax] = self._reg_v[node].mH @ (1.0 / self._reg_s[node]).diag() @ self._reg[node]
-
-        def _dd(a: OptArray) -> OptArray:
-            assert a.ndim == order
-            ans = reduce(transforms(expand(a), op_list))
-            if ax is not None:
-                # Projection
-                projection = transform(a, {ax: trace(ans, a.conj(), ax)})
-                ans -= projection
-            return ans
-
-        return _dd
-
     def node_eom(self, node: Node) -> Callable[[OptArray], OptArray]:
         ax = self.state.axes[node]
         order = self.state.frame.order(node)
@@ -288,10 +283,13 @@ class MasterEqn(object):
 
         def _dd(a: OptArray) -> OptArray:
             assert a.ndim == order
-            op_list = {i: self.mean_fields[node, i] for i in range(order)}
+            op_list = {
+                i: self.mean_fields[node, i] for i in range(order) if i != ax
+            }
             if ax is not None:
                 # Inversion
-                op_list[ax] = opt_pinv(self.densities[node]) @ op_list[ax]
+                op_list[ax] = self._reg_v[node].mH @ (
+                    1.0 / self._reg_s[node]).diag() @ self._reg[node]
             ans = reduce(transforms(expand(a), op_list))
             if ax is not None:
                 # Projection
@@ -317,7 +315,8 @@ class MasterEqn(object):
         from_axes = list(range(order))
         to_axes = list(range(order, 2 * order))
 
-        args = [(mat_list[i], [op_ax, order + ax_list[i], ax_list[i]]) for i in range(order)]
+        args = [(mat_list[i], [op_ax, order + ax_list[i], ax_list[i]])
+                for i in range(order)]
         args.append((to_axes + from_axes,))
         diff = opt_einsum(*chain(*args))
 
@@ -328,7 +327,9 @@ class MasterEqn(object):
 
         a = self.op.expand(self.state[p])
         conj_a = a.conj()
-        op_list = {_i: self.mean_fields[(p, _i)] for _i in range(order) if _i != i}
+        op_list = {
+            _i: self.mean_fields[(p, _i)] for _i in range(order) if _i != i
+        }
         return self.op.traces(conj_a, self.op.transforms(a, op_list), ax=i)
 
     def _get_mean_fields_type1(self) -> None:
@@ -372,7 +373,9 @@ class MasterEqn(object):
             u = self.op.expand(u.reshape(shape + [-1]).moveaxis(-1, i))
             conj_a = a.conj()
             conj_u = u.conj()
-            op_list = {_i: self.mean_fields[(p, _i)] for _i in range(order) if _i != i}
+            op_list = {
+                _i: self.mean_fields[(p, _i)] for _i in range(order) if _i != i
+            }
             trans = self.op.transforms(a, op_list)
             mf = self.op.traces(conj_a, trans, ax=i)
             reg = self.op.traces(conj_u, trans, ax=i)
@@ -405,7 +408,9 @@ class MasterEqn(object):
             u = self.op.expand(u.reshape(shape + [-1]).moveaxis(-1, i))
             conj_a = a.conj()
             conj_u = u.conj()
-            op_list = {_i: self.mean_fields[(p, _i)] for _i in range(order) if _i != i}
+            op_list = {
+                _i: self.mean_fields[(p, _i)] for _i in range(order) if _i != i
+            }
             trans = self.op.transforms(a, op_list)
             mf = self.op.traces(conj_a, trans, ax=i)
             reg = self.op.traces(conj_u, trans, ax=i)
@@ -433,13 +438,18 @@ class MasterEqn(object):
             ax = axes[p]
             _a = self.state[p]
             if ax is not None:
-                _a = self.transform(_a, {ax: self._reg_s[p].diag() @ self._reg_v[p]})
+                _a = self.transform(
+                    _a, {ax: self._reg_s[p].diag() @ self._reg_v[p]})
             shape = list(_a.shape)
             dim = shape.pop(i)
             u, s, v = opt_svd(_a.moveaxis(i, -1).reshape((-1, dim)))
             u = u.reshape(shape + [-1]).moveaxis(-1, i)
 
-            op_list = {_i: self.mean_fields[(p, _i)] for _i in range(order) if _i != i and _i != ax}
+            op_list = {
+                _i: self.mean_fields[(p, _i)]
+                for _i in range(order)
+                if _i != i and _i != ax
+            }
             if ax is not None:
                 op_list[ax] = self._reg[p]
 
@@ -475,7 +485,11 @@ class MasterEqn(object):
             u, r = opt_regularized_qr(_a.moveaxis(i, -1).reshape((-1, dim)))
             u = u.reshape(shape + [-1]).moveaxis(-1, i)
 
-            op_list = {_i: self.mean_fields[(p, _i)] for _i in range(order) if _i != i and _i != ax}
+            op_list = {
+                _i: self.mean_fields[(p, _i)]
+                for _i in range(order)
+                if _i != i and _i != ax
+            }
             if ax is not None:
                 op_list[ax] = self._reg[p]
 
@@ -519,13 +533,15 @@ class MasterEqn(object):
 class Propagator:
     max_steps = 1_000_000_000
 
-    def __init__(self,
-                 op: SumProdOp,
-                 state: CannonialModel,
-                 dt: float,
-                 ode_method: Literal['bosh3', 'dopri5', 'dopri8'] = 'dopri5',
-                 reg_method: Literal['proper', 'fast', 'proper_qr', 'fast_qr', 'pinv'] = 'proper',
-                 ps_method: Literal['cmf', 'ps1', 'ps2', 'vmf'] = 'vmf') -> None:
+    def __init__(
+            self,
+            op: SumProdOp,
+            state: CannonialModel,
+            dt: float,
+            ode_method: Literal['bosh3', 'dopri5', 'dopri8'] = 'dopri5',
+            reg_method: Literal['proper', 'fast', 'proper_qr', 'fast_qr',
+                                'pinv'] = 'proper',
+            ps_method: Literal['cmf', 'ps1', 'ps2', 'vmf'] = 'vmf') -> None:
 
         self.eom = MasterEqn(op, state)
         self.state = self.eom.state
@@ -537,7 +553,8 @@ class Propagator:
         self.reg_method = reg_method
 
         self._node_visitor = self.state.frame.node_visitor(self.state.root)
-        self._node_link_visitor = self.state.frame.node_link_visitor(self.state.root)
+        self._node_link_visitor = self.state.frame.node_link_visitor(
+            self.state.root)
         self._depths = self.state.depths
         self._move1 = self.state.split_unite_move
         self._move2 = self.state.unite_split_move
@@ -552,6 +569,7 @@ class Propagator:
         return
 
     def step(self) -> None:
+        # print({n:self.state.shape(n) for  n in self._node_visitor})
         if self.ps_method == 'cmf':
             self.eom._get_mean_fields_type1()
             self.eom._get_reg_mean_fields()
@@ -568,24 +586,30 @@ class Propagator:
         elif self.ps_method == 'vmf':
             y = self.eom.vector()
             if self.reg_method == 'fast':
-                ans = self._odeint(self.eom.vector_reg_eom(fast=True, use_qr=False), y, 1.0)
+                ans = self._odeint(
+                    self.eom.vector_reg_eom(fast=True, use_qr=False), y, 1.0)
             elif self.reg_method == 'proper':
-                ans = self._odeint(self.eom.vector_reg_eom(fast=False, use_qr=False), y, 1.0)
+                ans = self._odeint(
+                    self.eom.vector_reg_eom(fast=False, use_qr=False), y, 1.0)
             elif self.reg_method == 'fast_qr':
-                ans = self._odeint(self.eom.vector_reg_eom(fast=True, use_qr=True), y, 1.0)
+                ans = self._odeint(
+                    self.eom.vector_reg_eom(fast=True, use_qr=True), y, 1.0)
             elif self.reg_method == 'proper_qr':
-                ans = self._odeint(self.eom.vector_reg_eom(fast=False, use_qr=True), y, 1.0)
+                ans = self._odeint(
+                    self.eom.vector_reg_eom(fast=False, use_qr=True), y, 1.0)
             elif self.reg_method == 'pinv':
                 ans = self._odeint(self.eom.vector_eom(), y, 1.0)
             else:
-                raise NotImplementedError(f'No regularization method `{self.reg_method}`.')
+                raise NotImplementedError(
+                    f'No regularization method `{self.reg_method}`.')
             self.eom.vector_update(ans)
         else:
-            raise NotImplementedError(f'No Projector splitting method `{self.ps_method}`.')
+            raise NotImplementedError(
+                f'No Projector splitting method `{self.ps_method}`.')
         return
 
     def _node_step(self, p: Node, ratio: float) -> None:
-        ans = self._odeint(self.eom.node_reg_eom(p), self.state[p], ratio)
+        ans = self._odeint(self.eom.node_eom(p), self.state[p], ratio)
         self.state.opt_update(p, ans)
         return
 
@@ -617,7 +641,8 @@ class Propagator:
                 move(i, op=self._ps1_mid_op(p, i, q, j, None))
         return
 
-    def _ps1_mid_op(self, p: Node, i: int, q: Node, j: int, ratio: Optional[float]) -> Callable[[OptArray], OptArray]:
+    def _ps1_mid_op(self, p: Node, i: int, q: Node, j: int,
+                    ratio: Optional[float]) -> Callable[[OptArray], OptArray]:
         """Assue the tensor for p in self.state has been updated."""
 
         expand = self.op.expand
@@ -632,7 +657,11 @@ class Propagator:
             if ratio is None:
                 return mid
             else:
-                _dd = lambda a: reduce(transforms(expand(a), {0: l_mat, 1: r_mat}))
+                _dd = lambda a: reduce(
+                    transforms(expand(a), {
+                        0: l_mat,
+                        1: r_mat
+                    }))
                 return self._odeint(_dd, mid, ratio)
 
         return _op
@@ -650,7 +679,8 @@ class Propagator:
                 move1(i, op=self._ps1_mid_op(p, i, q, j, None))
             else:
                 move2(i, op=self._ps2_mid_op(p, i, q, j, ratio))
-                self.eom.mean_fields[q, j] = self.eom._mean_field_with_node(p, i)
+                self.eom.mean_fields[q,
+                                     j] = self.eom._mean_field_with_node(p, i)
                 del self.eom.mean_fields[p, i]
                 if n != end:
                     self._node_step(q, -ratio)
@@ -668,13 +698,15 @@ class Propagator:
                 if n != 0:
                     self._node_step(p, -ratio)
                 move2(i, op=self._ps2_mid_op(p, i, q, j, ratio))
-                self.eom.mean_fields[q, j] = self.eom._mean_field_with_node(p, i)
+                self.eom.mean_fields[q,
+                                     j] = self.eom._mean_field_with_node(p, i)
                 del self.eom.mean_fields[p, i]
             else:
                 move1(i, op=self._ps1_mid_op(p, i, q, j, None))
         return
 
-    def _ps2_mid_op(self, p: Node, i: int, q: Node, j: int, ratio: float) -> Callable[[OptArray], OptArray]:
+    def _ps2_mid_op(self, p: Node, i: int, q: Node, j: int,
+                    ratio: float) -> Callable[[OptArray], OptArray]:
         expand = self.op.expand
         transforms = self.op.transforms
         reduce = self.op.reduce
@@ -682,8 +714,12 @@ class Propagator:
         def _op(mid: OptArray) -> OptArray:
             ord_p = self.state.frame.order(p)
             ord_q = self.state.frame.order(q)
-            l_ops = [self.eom.mean_fields[p, _i] for _i in range(ord_p) if _i != i]
-            r_ops = [self.eom.mean_fields[q, _j] for _j in range(ord_q) if _j != j]
+            l_ops = [
+                self.eom.mean_fields[p, _i] for _i in range(ord_p) if _i != i
+            ]
+            r_ops = [
+                self.eom.mean_fields[q, _j] for _j in range(ord_q) if _j != j
+            ]
             op_dict = dict(enumerate(l_ops + r_ops))
 
             _dd = lambda a: reduce(transforms(expand(a), op_dict))
@@ -691,7 +727,8 @@ class Propagator:
 
         return _op
 
-    def _odeint(self, func: Callable[[OptArray], OptArray], y0: OptArray, ratio: float) -> OptArray:
+    def _odeint(self, func: Callable[[OptArray], OptArray], y0: OptArray,
+                ratio: float) -> OptArray:
         ans, n_eval = odeint(func, y0, ratio * self.dt, method=self.ode_method)
         self.ode_step_counter.append(n_eval)
         return ans

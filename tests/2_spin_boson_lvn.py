@@ -33,10 +33,9 @@ if __name__ == '__main__':
     parser.add_argument('--dim', type=int, default=10)
     parser.add_argument('--htd_method', type=str, default='Tree2')
     parser.add_argument('--decimation_rate', type=int, default=None)
-    parser.add_argument('--rank', type=int, default=50)
+    parser.add_argument('--rank', type=int, default=100)
 
     parser.add_argument('--heom_factor', type=float, default=2.0)
-    parser.add_argument('--ps_method', type=str, default='ps2')
     parser.add_argument('--ode_method', type=str, default='dopri5')
     parser.add_argument('--reg_method', type=str, default='proper')
 
@@ -45,9 +44,9 @@ if __name__ == '__main__':
     parser.add_argument('--ode_atol', type=float, default=1.0e-7)
     parser.add_argument('--svd_atol', type=float, default=1.0e-7)
 
-    parser.add_argument('--dt', type=float, default=0.1)
-    parser.add_argument('--end', type=float, default=100.0)
-    parser.add_argument('--callback_steps', type=int, default=100)
+    parser.add_argument('--dt', type=float, default=[0.1, 0.1])
+    parser.add_argument('--end', type=float, default=[1.0, 100.0])
+    parser.add_argument('--callback_steps', type=int, default=[1, 10])
 
     args = parser.parse_args()
     kwargs = {arg: getattr(args, arg) for arg in vars(args)}
@@ -55,7 +54,7 @@ if __name__ == '__main__':
     if out is None:
         out = os.path.splitext(os.path.basename(__file__))[0]
     if not out.endswith('.log'):
-        out += '_ps2_debug.log'
+        out += '_ps1.log'
 
     kwargs['init_rdo'] = array([[0.5, 0.5], [0.5, 0.5]])
     kwargs['dvr_space'] = (-32, 32)

@@ -14,7 +14,7 @@ from mugnier.libs.utils import count_calls
 # import opt_einsum as oe
 
 DOUBLE_PRECISION = True
-FORCE_CPU = False
+FORCE_CPU = True
 MAX_EINSUM_AXES = 52  # restrition from torch.einsum as of PyTorch 1.10
 PI = np.pi
 
@@ -140,7 +140,7 @@ def opt_compressed_qr(a: OptArray,
         s = s[:rank]
         u = u[:, :rank]
         vh = vh[:rank, :]
-        s /= torch.sum(s)
+    s /= torch.sum(s)
     ss = s.diag().to(opt_dtype)
 
     return u, ss @ vh
