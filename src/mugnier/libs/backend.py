@@ -18,6 +18,7 @@ FORCE_CPU = True
 MAX_EINSUM_AXES = 52  # restrition from torch.einsum as of PyTorch 1.10
 PI = np.pi
 
+
 # Place to keep magic numbers
 class Parameters:
     ode_rtol = 1.0e-5
@@ -36,6 +37,7 @@ class Parameters:
         string += f' | SVD({log10(self.svd_atol):+.0f})'
         string += f' | Device:{self.device}'
         return string
+
 
 parameters = Parameters()
 
@@ -115,7 +117,8 @@ def opt_sum(array: OptArray, dim: int) -> OptArray:
 
 
 @torch.no_grad()
-def opt_tensordot(a: OptArray, b: OptArray, axes: Tuple[list[int], list[int]]) -> OptArray:
+def opt_tensordot(a: OptArray, b: OptArray, axes: Tuple[list[int],
+                                                        list[int]]) -> OptArray:
     return torch.tensordot(a, b, dims=axes)
 
 
@@ -135,6 +138,7 @@ def opt_compressed_qr(a: OptArray,
     # default
     if rank is None:
         rank = 1
+    rank *= 3
 
     if rank is not None and rank <= len(s):
         s = s[:rank]
@@ -176,13 +180,17 @@ def opt_svd(a: OptArray) -> Tuple[OptArray, OptArray]:
 @torch.no_grad()
 def opt_regularized_qr(a: OptArray) -> Tuple[OptArray, OptArray]:
     q, r = torch.linalg.qr(a, mode='reduced')
-    reg = parameters.svd_atol * torch.eye(r.shape[0], r.shape[1], device=parameters.device, dtype=opt_dtype)
+    reg = parameters.svd_atol * torch.eye(
+        r.shape[0], r.shape[1], device=parameters.device, dtype=opt_dtype)
     r = torch.where(torch.abs(r) > torch.abs(reg), r, reg)
     return q, r
 
 
 @torch.no_grad()
-def odeint(func: Callable[[OptArray], OptArray], y0: OptArray, dt: float, method='dopri5') -> Tuple[OptArray, int]:
+def odeint(func: Callable[[OptArray], OptArray],
+           y0: OptArray,
+           dt: float,
+           method='dopri5') -> Tuple[OptArray, int]:
     """Avaliable method:
     - Adaptive-step:
         - `dopri8` Runge-Kutta 7(8) of Dormand-Prince-Shampine
@@ -209,9 +217,18 @@ def odeint(func: Callable[[OptArray], OptArray], y0: OptArray, dt: float, method
     _y0 = torch.stack([y0.real, y0.imag])
     _t = torch.tensor([0.0, dt], device=parameters.device)
     if method == 'BDF':
-        y1 = torchdiffeq.odeint(_func, _y0, _t, method='scipy_solver', options={'solver': 'BDF'})
+        y1 = torchdiffeq.odeint(_func,
+                                _y0,
+                                _t,
+                                method='scipy_solver',
+                                options={'solver': 'BDF'})
     else:
-        y1 = torchdiffeq.odeint(_func, _y0, _t, method=method, rtol=parameters.ode_rtol, atol=parameters.ode_atol)
+        y1 = torchdiffeq.odeint(_func,
+                                _y0,
+                                _t,
+                                method=method,
+                                rtol=parameters.ode_rtol,
+                                atol=parameters.ode_atol)
     return (y1[1][0] + 1.0j * y1[1][1]), _func.calls
 
 

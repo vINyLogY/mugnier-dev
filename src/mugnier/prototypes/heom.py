@@ -99,6 +99,7 @@ def run_spin_boson(
     spaces = dict(enumerate(spaces_list))
     corr = Correlation(sds, distr)
     corr.fix(roundoff=roundoff)
+    print(corr)
 
     # HEOM settings:
     dims = [ht_dim if k in spaces else dim for k in range(corr.k_max)]

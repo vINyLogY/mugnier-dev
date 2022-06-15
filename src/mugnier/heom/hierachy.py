@@ -169,7 +169,7 @@ class TreeHierachy(Hierachy):
                 super().__init__(f'T{cls._counter}')
                 cls._counter += 1
 
-        importances = list(reversed(range(len(dims))))
+        importances = list(dims)
         graph, p_node = huffman_tree(p_ends, new_node, importances=importances, n_ary=n_ary)
         frame.add_link(e_node, p_node)
         for n, children in graph.items():
