@@ -729,6 +729,18 @@ class Propagator:
 
     def _odeint(self, func: Callable[[OptArray], OptArray], y0: OptArray,
                 ratio: float) -> OptArray:
-        ans, n_eval = odeint(func, y0, ratio * self.dt, method=self.ode_method)
+        if self.ode_method == 'rk4':
+            dt = ratio * self.dt
+            k1 = func(y0) * dt
+            k2 = func(y0 + k1 / 3.0) * dt
+            k3 = func(y0 - k1 / 3.0 + k2) * dt
+            k4 = func(y0 + k1 - k2 + k3) * dt
+            ans = y0 + (k1 + 3.0 * k2 + 3.0 * k3 + k4) / 8.0
+            n_eval = 4
+        else:
+            ans, n_eval = odeint(func,
+                                 y0,
+                                 ratio * self.dt,
+                                 method=self.ode_method)
         self.ode_step_counter.append(n_eval)
         return ans

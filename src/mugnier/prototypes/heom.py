@@ -160,8 +160,8 @@ def run_spin_boson(
             if (_n + 1) % callback_steps == 0:
                 rdo = s.get_rdo()
                 trace = rdo[0, 0] + rdo[1, 1]
-                #s.opt_update(s.root, s[s.root] / trace)
-                #rdo /= trace
+                s.opt_update(s.root, s[s.root] / trace)
+                rdo /= trace
                 t = _t * scaling
                 logger.info(
                     f'{t} {rdo[0, 0]} {rdo[0, 1]} {rdo[1, 0]} {rdo[1, 1]}')
