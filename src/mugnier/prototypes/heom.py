@@ -67,7 +67,7 @@ def run_spin_boson(
 
     # System settings:
     p0 = 0.5
-    scaling = 1.0 / __(elec_bias, energy_unit).au
+    scaling = 1.0 / __(max(abs(elec_bias), abs(elec_coupling)), energy_unit).au
     e = __(elec_bias, energy_unit).au * scaling
     v = __(elec_coupling, energy_unit).au * scaling
     h = backend.array([[-p0 * e, v], [v, (1.0 - p0) * e]])
@@ -171,7 +171,7 @@ def run_spin_boson(
                 _steps = sum(propagator.ode_step_counter)
                 cpu_time = time()
                 info = f'[{cpu_time - cpu_time0:.3f} s] {__(t).convert_to("fs").value:.3f} fs | ODE steps:{_steps}'
-                info += f' | Tr:1{(trace.real - 1):+e}{trace.imag:+e}j | Coh:{coh:f}'
+                info += f' | Tr:1{(trace.real - 1):+e}{trace.imag:+e}j | Coh:{coh:f} | Pop:{abs(rdo[0, 0])}'
                 print(info, flush=True)
                 cpu_time0 = cpu_time
                 propagator.ode_step_counter = []

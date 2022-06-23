@@ -16,7 +16,7 @@ if __name__ == '__main__':
     parser.add_argument('--elec_bias', type=float, default=5000.0)
     parser.add_argument('--elec_coupling', type=float, default=0.0)
 
-    parser.add_argument('--include_drude', type=bool, default=False)
+    parser.add_argument('--include_drude', type=bool, default=True)
     parser.add_argument('--re_d', type=float, default=200.0)
     parser.add_argument('--width_d', type=float, default=100.0)
 
@@ -31,9 +31,9 @@ if __name__ == '__main__':
     parser.add_argument('--n_ltc', type=int, default=3)
 
     parser.add_argument('--dim', type=int, default=10)
-    parser.add_argument('--htd_method', type=str, default='Tree2')
+    parser.add_argument('--htd_method', type=str, default='Train')
     parser.add_argument('--decimation_rate', type=int, default=None)
-    parser.add_argument('--rank', type=int, default=10)
+    parser.add_argument('--rank', type=int, default=4)
 
     parser.add_argument('--heom_factor', type=float, default=2.0)
     parser.add_argument('--ps_method', type=str, default='ps2')
@@ -46,7 +46,7 @@ if __name__ == '__main__':
     parser.add_argument('--svd_atol', type=float, default=1.0e-7)
 
     parser.add_argument('--dt', type=float, default=0.1)
-    parser.add_argument('--end', type=float, default=100.0)
+    parser.add_argument('--end', type=float, default=300.0)
     parser.add_argument('--callback_steps', type=int, default=100)
 
     args = parser.parse_args()
@@ -55,12 +55,13 @@ if __name__ == '__main__':
     if out is None:
         out = os.path.splitext(os.path.basename(__file__))[0]
     if not out.endswith('.log'):
-        out += '_tree2_ps2_brownian.log'
+        out += '_ubo_1dof+drude.log'
 
     kwargs['init_rdo'] = array([[0.5, 0.5], [0.5, 0.5]])
+    # kwargs['init_rdo'] = array([[1., 0.], [0., 0.]])
     kwargs['dvr_space'] = (-32, 32)
     kwargs['use_dvr'] = False
-    kwargs['ht_dim'] = 10
+    kwargs['ht_dim'] = 20
     kwargs['out'] = out
 
     for k, v in sorted(kwargs.items()):

@@ -138,7 +138,7 @@ def opt_compressed_qr(a: OptArray,
     # default
     if rank is None:
         rank = 1
-    rank *= 3
+    rank = min(3 * rank, 8)
 
     if rank is not None and rank <= len(s):
         s = s[:rank]
