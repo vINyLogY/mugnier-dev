@@ -1,6 +1,6 @@
 from functools import reduce
 from math import prod
-from typing import Callable, Iterable, Optional, Tuple
+from typing import Callable, Iterable, Optional
 
 from mugnier.libs.backend import (Array, OptArray, array, eye, np, opt_compressed_qr, opt_tensordot, optimize, zeros)
 from mugnier.state.frame import End, Frame, Node, Point
@@ -47,7 +47,7 @@ class Model:
         """
         self.frame = frame
         self.ends = frame.ends
-        self._dims = dict()  # type: dict[Tuple[Point, int], int]
+        self._dims = dict()  # type: dict[tuple[Point, int], int]
         self._valuation = dict()  # type: dict[Node, OptArray]
         return
 
@@ -99,7 +99,7 @@ class Model:
         self._dims.update({(p, i): dim for i, dim in enumerate(array.shape)})
         return
 
-    def fill_zeros(self, dims: Optional[dict[Tuple[Node, int], int]] = None, default_dim: int = 1) -> None:
+    def fill_zeros(self, dims: Optional[dict[tuple[Node, int], int]] = None, default_dim: int = 1) -> None:
         """
         Fill the unassigned part of model with proper shape arrays.
         Specify the dimension for each Edge in dims (default is 1).
@@ -169,7 +169,7 @@ class CannonialModel(Model):
 
         return self._depths
 
-    def fill_eyes(self, dims: Optional[dict[Tuple[Node, int], int]] = None, default_dim: int = 1) -> None:
+    def fill_eyes(self, dims: Optional[dict[tuple[Node, int], int]] = None, default_dim: int = 1) -> None:
         """
         Fill the unassigned part of model with proper shape arrays.
         Specify the each dimension tensors (default is 1).

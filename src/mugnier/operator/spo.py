@@ -2,7 +2,7 @@
 
 from itertools import chain
 from math import prod
-from typing import Callable, Generator, Literal, Optional, Tuple
+from typing import Callable, Generator, Literal, Optional
 
 import numpy as np
 from mugnier.libs.backend import (MAX_EINSUM_AXES, Array, OptArray, eye, odeint,
@@ -146,7 +146,7 @@ class MasterEqn(object):
         self.op = op
         self.state = state
 
-        self.mean_fields = dict()  # type: dict[Tuple[Node, int], OptArray]
+        self.mean_fields = dict()  # type: dict[tuple[Node, int], OptArray]
         self.densities = dict()  # type: dict[Node, OptArray]
 
         # Temp for regularization
@@ -363,7 +363,7 @@ class MasterEqn(object):
         axes = self.state.axes
         dual = self.state.frame.dual
 
-        def regularize(p: Node, i: int) -> Tuple[OptArray, ...]:
+        def regularize(p: Node, i: int) -> tuple[OptArray, ...]:
             order = self.state.frame.order(p)
             shape = list(self.state.shape(p))
             dim = shape.pop(i)
@@ -398,7 +398,7 @@ class MasterEqn(object):
         axes = self.state.axes
         dual = self.state.frame.dual
 
-        def regularize(p: Node, i: int) -> Tuple[OptArray, ...]:
+        def regularize(p: Node, i: int) -> tuple[OptArray, ...]:
             order = self.state.frame.order(p)
             shape = list(self.state.shape(p))
             dim = shape.pop(i)
@@ -433,7 +433,7 @@ class MasterEqn(object):
         axes = self.state.axes
         dual = self.state.frame.dual
 
-        def regularize(p: Node, i: int) -> Tuple[OptArray, ...]:
+        def regularize(p: Node, i: int) -> tuple[OptArray, ...]:
             order = self.state.frame.order(p)
             ax = axes[p]
             _a = self.state[p]
@@ -474,7 +474,7 @@ class MasterEqn(object):
         axes = self.state.axes
         dual = self.state.frame.dual
 
-        def regularize(p: Node, i: int) -> Tuple[OptArray, ...]:
+        def regularize(p: Node, i: int) -> tuple[OptArray, ...]:
             order = self.state.frame.order(p)
             ax = axes[p]
             _a = self.state[p]

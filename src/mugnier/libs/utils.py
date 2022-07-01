@@ -6,7 +6,7 @@ from builtins import map, zip
 from collections import OrderedDict
 from itertools import tee
 from operator import itemgetter
-from typing import (Any, Callable, Generator, Iterable, Literal, Optional, Tuple, TypeVar)
+from typing import (Any, Callable, Generator, Iterable, Literal, Optional, TypeVar)
 
 T = TypeVar('T')
 
@@ -35,7 +35,7 @@ def count_calls(f: Callable[..., T]) -> Callable[..., T]:
     wrapped.calls = 0
     return wrapped
 
-def iter_round_visitor(start: T, r: Callable[[T], list[T]]) -> Generator[Tuple[T, bool], None, None]:
+def iter_round_visitor(start: T, r: Callable[[T], list[T]]) -> Generator[tuple[T, bool], None, None]:
     """Iterative round-trip visitor. Only support 'DFS' (depth first) method.
 
     Args:
@@ -54,7 +54,7 @@ def iter_round_visitor(start: T, r: Callable[[T], list[T]]) -> Generator[Tuple[T
 
 def iter_visitor(start: T,
                  r: Callable[[T], list[T]],
-                 method: Literal['DFS', 'BFS'] = 'DFS') -> Generator[Tuple[T, int], None, None]:
+                 method: Literal['DFS', 'BFS'] = 'DFS') -> Generator[tuple[T, int], None, None]:
     """Iterative visitor.
 
     Args:
@@ -118,7 +118,7 @@ def path(start: T, stop: T, r: Callable[[T], list[T]]) -> list[T]:
 def huffman_tree(sources: list[T],
                  new_obj: Callable[[], T],
                  importances: Optional[list[int]] = None,
-                 n_ary: int = 2) -> Tuple[OrderedDict[T, list[T]], T]:
+                 n_ary: int = 2) -> tuple[OrderedDict[T, list[T]], T]:
     """Generate a Tree for the soureces as leaves using Huffman coding method.
     """
     if importances is None:

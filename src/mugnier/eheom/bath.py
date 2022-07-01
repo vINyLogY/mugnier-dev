@@ -4,11 +4,7 @@
 Decomposition of the bath and BE distribution
 """
 from __future__ import annotations
-from math import gamma
-
 from typing import Callable, Literal, Optional
-
-from matplotlib.pyplot import cla
 
 from mugnier.libs.backend import PI, Array, array, np
 
@@ -108,15 +104,15 @@ class Correlation(object):
         self.spectral_densities = spectral_densities
         self.distribution = distribution
 
-        self.coefficients = list()  # type: list[complex]
-        self.conj_coefficents = list()  # type: list[complex]
+        self.sym_coefficients = list()  # type: list[complex]
+        self.asym_coefficients = list()  # type: list[complex]
         self.derivatives = list()  # type: list[complex]
 
         for sd in spectral_densities:
-            cs, ccs, ds = sd.get_htc(distr=distribution)
-            self.coefficients.extend(cs)
-            self.conj_coefficents.extend(ccs)
-            self.derivatives.extend(ds)
+            ss, aa, dd = sd.get_htc(distr=distribution)
+            self.sym_coefficients.extend(ss)
+            self.asym_coefficients.extend(aa)
+            self.derivatives.extend(dd)
         self.get_ltc()
         return
 
@@ -128,8 +124,8 @@ class Correlation(object):
             im = 0.0 if abs(num.imag) < roundoff else num.imag
             return re + 1.0j * im
 
-        self.coefficients = list(map(_fix, self.coefficients))
-        self.conj_coefficents = list(map(_fix, self.conj_coefficents))
+        self.sym_coefficients = list(map(_fix, self.sym_coefficients))
+        self.asym_coefficients = list(map(_fix, self.asym_coefficients))
         self.derivatives = list(map(_fix, self.derivatives))
         return
 
@@ -144,17 +140,17 @@ class Correlation(object):
             cs = [-2.0j * PI * res * sd.function(pole) for sd in self.spectral_densities if callable(sd.function)]
             if cs:
                 c = np.sum(cs)
-                self.coefficients.append(c)
-                self.conj_coefficents.append(np.conj(c))
+                self.sym_coefficients.append((c + np.conj(c)) / 2.0)
+                self.asym_coefficients.append((c - np.conj(c)) / 2.0)
                 self.derivatives.append(d)
         return
 
     def __str__(self) -> None:
         k = self.k_max
         if k > 0:
-            string = f"Correlation {k} * ( c | c* | g ):"
-            for c, cc, g in zip(self.coefficients, self.conj_coefficents, self.derivatives):
-                string += f"\n{c.real:+.4e}{c.imag:+.4e}j | {cc.real:+.4e}{cc.imag:+.4e}j | {g.real:+.4e}{g.imag:+.4e}j"
+            string = f"Correlation {k} * ( s | a | g ):"
+            for s, a, g in zip(self.sym_coefficients, self.asym_coefficients, self.derivatives):
+                string += f"\n{s.real:+.4e}{s.imag:+.4e}j | {a.real:+.4e}{a.imag:+.4e}j | {g.real:+.4e}{g.imag:+.4e}j"
         else:
             string = 'Empty Correlation object'
         return string
@@ -184,10 +180,10 @@ class Drude(SpectralDensity):
     def get_htc(self, distr: BoseEinstein) -> tuple[list[complex], list[complex], list[complex]]:
         _c = -2.0j * self.l * self.g * distr.function(-1.0j * self.g)
         _d = -self.g
-        coefficients = [_c]
-        conj_coefficents = [np.conj(_c)]
+        sym_coeff = [_c + np.conj(_c) / 2.0]
+        asym_coeff = [_c - np.conj(_c) / 2.0]
         derivatives = [_d]
-        return coefficients, conj_coefficents, derivatives
+        return sym_coeff, asym_coeff, derivatives
 
 
 class DiscreteVibration(SpectralDensity):
@@ -203,10 +199,12 @@ class DiscreteVibration(SpectralDensity):
         g = self.g
         beta = distr.beta
         coth = 1.0 / np.tanh(beta * w0 / 2.0) if beta is not None else 1.0
-        coefficients = [g**2 / 2.0 * (coth + 1.0), g**2 / 2.0 * (coth - 1.0)]
-        conj_coefficents = [g**2 / 2.0 * (coth - 1.0), g**2 / 2.0 * (coth + 1.0)]
+        c1 = g**2 / 2.0 * (coth + 1.0)
+        c2 = g**2 / 2.0 * (coth - 1.0)
+        sym_coeff = [(c1 + c2) / 2.0, (c2 + c1) / 2.0]
+        asym_coeff = [(c1 - c2) / 2.0, (c2 - c1) / 2.0]
         derivatives = [-1.0j * w0, +1.0j * w0]
-        return coefficients, conj_coefficents, derivatives
+        return sym_coeff, asym_coeff, derivatives
 
 
 class UnderdampedBrownian(SpectralDensity):
@@ -233,7 +231,7 @@ class UnderdampedBrownian(SpectralDensity):
         c1 = +a * f(-1.0j * (g + 1.0j * w0))
         c2 = -a * f(-1.0j * (g - 1.0j * w0))
 
-        coefficients = [c1, c2]
-        conj_coefficents = [np.conj(c2), np.conj(c1)]
+        sym_coeff = [(c1 + np.conj(c2)) / 2.0, (c2 + np.conj(c1)) / 2.0]
+        asym_coeff = [(c1 - np.conj(c2)) / 2.0, (c2 - np.conj(c1)) / 2.0]
         derivatives = [-(g + 1.0j * w0), -(g - 1.0j * w0)]
-        return coefficients, conj_coefficents, derivatives
+        return sym_coeff, asym_coeff, derivatives

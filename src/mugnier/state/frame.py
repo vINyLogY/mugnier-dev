@@ -6,7 +6,7 @@ r"""Data structure for topology of tensors in a network
 from __future__ import annotations
 
 from itertools import pairwise
-from typing import Literal, Optional, Tuple
+from typing import Literal, Optional
 from weakref import WeakValueDictionary
 
 from mugnier.libs.utils import iter_round_visitor, iter_visitor
@@ -47,7 +47,7 @@ class Frame:
 
     def __init__(self):
         self._neighbor = dict()  # type: dict[Point, list[Point]]
-        self._duality = dict()  # type: dict[Tuple[Point, int], Tuple[Point, int]]
+        self._duality = dict()  # type: dict[tuple[Point, int], tuple[Point, int]]
         return
 
     def add_link(self, p: Point, q: Point) -> None:
@@ -71,7 +71,7 @@ class Frame:
         return set(self._neighbor.keys())
 
     @property
-    def links(self) -> set[Tuple[Point, int, Point, int]]:
+    def links(self) -> set[tuple[Point, int, Point, int]]:
         return {(p, i, q, j) for (p, i), (q, j) in self._duality.items()}
 
     @property
@@ -91,15 +91,15 @@ class Frame:
     def near_nodes(self, key: Point) -> list[Node]:
         return [n for n in self._neighbor[key] if isinstance(n, Node)]
 
-    def dual(self, p: Point, i: int) -> Tuple[Point, int]:
+    def dual(self, p: Point, i: int) -> tuple[Point, int]:
         return self._duality[(p, i)]
 
-    def find_axes(self, p: Point, q: Point) -> Tuple[int, int]:
+    def find_axes(self, p: Point, q: Point) -> tuple[int, int]:
         i = self._neighbor[p].index(q)
         j = self._neighbor[q].index(p)
         return i, j
 
-    def node_link_visitor(self, start: Node) -> list[Tuple[Node, int, Node, int]]:
+    def node_link_visitor(self, start: Node) -> list[tuple[Node, int, Node, int]]:
         nodes = [n for n in iter_round_visitor(start, self.near_nodes)]
         axes_list = [self.find_axes(n1, n2) for n1, n2 in pairwise(nodes)]
         return [(p, i, q, j) for (p, q), (i, j) in zip(pairwise(nodes), axes_list)]

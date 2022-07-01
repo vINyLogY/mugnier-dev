@@ -6,7 +6,7 @@ from inspect import trace
 from itertools import chain, pairwise
 from math import prod, sqrt
 from optparse import Option
-from typing import Optional, Tuple
+from typing import Optional
 from mugnier.basis.dvr import SineDVR
 
 from mugnier.heom.bath import Correlation, DiscreteVibration

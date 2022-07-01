@@ -3,7 +3,7 @@ r"""Backend for accelerated array-operations.
 """
 
 from math import log10
-from typing import Callable, Optional, Tuple
+from typing import Callable, Optional
 import numpy as np
 import torch
 from numpy.typing import ArrayLike, NDArray
@@ -117,14 +117,14 @@ def opt_sum(array: OptArray, dim: int) -> OptArray:
 
 
 @torch.no_grad()
-def opt_tensordot(a: OptArray, b: OptArray, axes: Tuple[list[int],
+def opt_tensordot(a: OptArray, b: OptArray, axes: tuple[list[int],
                                                         list[int]]) -> OptArray:
     return torch.tensordot(a, b, dims=axes)
 
 
 @torch.no_grad()
 def opt_compressed_qr(a: OptArray,
-                      rank: Optional[int] = None) -> Tuple[OptArray, OptArray]:
+                      rank: Optional[int] = None) -> tuple[OptArray, OptArray]:
     u, s, vh = torch.linalg.svd(a, full_matrices=False)
 
     # Calculate rank from atol
@@ -151,7 +151,7 @@ def opt_compressed_qr(a: OptArray,
 
 
 @torch.no_grad()
-def opt_svd(a: OptArray) -> Tuple[OptArray, OptArray]:
+def opt_svd(a: OptArray) -> tuple[OptArray, OptArray]:
     u, s, vh = torch.linalg.svd(a, full_matrices=False)
     reg = parameters.svd_atol * torch.ones_like(s)
     s = torch.maximum(s, reg)
@@ -161,7 +161,7 @@ def opt_svd(a: OptArray) -> Tuple[OptArray, OptArray]:
 
 
 # @torch.no_grad()
-# def opt_svd(a: OptArray) -> Tuple[OptArray, OptArray]:
+# def opt_svd(a: OptArray) -> tuple[OptArray, OptArray]:
 #     u, s, vh = torch.linalg.svd(a, full_matrices=False)
 #     total_error = 0.0
 #     rank = 1
@@ -178,7 +178,7 @@ def opt_svd(a: OptArray) -> Tuple[OptArray, OptArray]:
 
 
 @torch.no_grad()
-def opt_regularized_qr(a: OptArray) -> Tuple[OptArray, OptArray]:
+def opt_regularized_qr(a: OptArray) -> tuple[OptArray, OptArray]:
     q, r = torch.linalg.qr(a, mode='reduced')
     reg = parameters.svd_atol * torch.eye(
         r.shape[0], r.shape[1], device=parameters.device, dtype=opt_dtype)
@@ -190,7 +190,7 @@ def opt_regularized_qr(a: OptArray) -> Tuple[OptArray, OptArray]:
 def odeint(func: Callable[[OptArray], OptArray],
            y0: OptArray,
            dt: float,
-           method='dopri5') -> Tuple[OptArray, int]:
+           method='dopri5') -> tuple[OptArray, int]:
     """Avaliable method:
     - Adaptive-step:
         - `dopri8` Runge-Kutta 7(8) of Dormand-Prince-Shampine

@@ -14,7 +14,7 @@ if __name__ == '__main__':
     parser.add_argument('--dry_run', action='store_true')
 
     parser.add_argument('--elec_bias', type=float, default=5000.0)
-    parser.add_argument('--elec_coupling', type=float, default=0.0)
+    parser.add_argument('--elec_coupling', type=float, default=1000.0)
 
     parser.add_argument('--include_drude', type=bool, default=True)
     parser.add_argument('--re_d', type=float, default=200.0)
@@ -55,7 +55,7 @@ if __name__ == '__main__':
     if out is None:
         out = os.path.splitext(os.path.basename(__file__))[0]
     if not out.endswith('.log'):
-        out += '_ubo_1dof+drude.log'
+        out += '.log'
 
     kwargs['init_rdo'] = array([[0.5, 0.5], [0.5, 0.5]])
     # kwargs['init_rdo'] = array([[1., 0.], [0., 0.]])
