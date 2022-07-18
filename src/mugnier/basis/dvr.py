@@ -19,7 +19,9 @@ class SineDVR:
 
         _i = np.arange(1, self.n + 1)[:, np.newaxis]
         _j = np.arange(1, self.n + 1)[np.newaxis, :]
-        self.dvr2fbr_mat = (np.sqrt(2 / (self.n + 1)) * np.sin(_i * _j * np.pi / (self.n + 1)))  # type: NDArray
+        self.dvr2fbr_mat = (np.sqrt(2 / (self.n + 1)) * np.sin(_i * _j * np.pi /
+                                                               (self.n + 1))
+                           )  # type: NDArray
         return
 
     @property
@@ -36,7 +38,8 @@ class SineDVR:
         for j in range(1, n + 1):
             for k in range(1, n + 1):
                 if j != k:
-                    fbr_mat[j - 1, k - 1] = ((j - k) % 2) * 4.0 * j * k / (j**2 - k**2) / l
+                    fbr_mat[j - 1, k -
+                            1] = ((j - k) % 2) * 4.0 * j * k / (j**2 - k**2) / l
         u = self.dvr2fbr_mat
         return u.T @ fbr_mat @ u
 
@@ -47,6 +50,16 @@ class SineDVR:
         fbr_mat = np.diag(-(j * np.pi / self.length)**2)
         u = self.dvr2fbr_mat
         return u.T @ fbr_mat @ u
+
+    @property
+    def t_mat(self):
+        """Return the kinetic energy matrix in DVR.
+        Returns
+        -------
+        (n, n) np.ndarray
+            A 2-d matrix.
+        """
+        return -0.5 * self.dq2_mat
 
     @property
     def creation_mat(self) -> NDArray:
@@ -83,8 +96,9 @@ class SineDVR:
         x0 = self.grid_points[0]
 
         def _func(_x: NDArray) -> NDArray:
-            return np.where(np.logical_and(x0 < _x, _x < x0 + l),
-                            np.sqrt(2.0 / l) * np.sin((i + 1) * np.pi * (_x - x0) / l), 0.0)
+            return np.where(
+                np.logical_and(x0 < _x, _x < x0 + l),
+                np.sqrt(2.0 / l) * np.sin((i + 1) * np.pi * (_x - x0) / l), 0.0)
 
         return _func
 

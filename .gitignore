@@ -5,6 +5,7 @@
 *.png
 launch.json
 working/
+*.zip
 
 ## Ref: https://github.com/github/gitignore
 # Byte-compiled / optimized / DLL files
