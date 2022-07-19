@@ -249,5 +249,5 @@ logger = Logger(filename='3_dvr_heom.log', level='info').logger
 for _t, rho in it:
     pr = torch.trace(rho @ rho).cpu().numpy()
     print(_t, (pr), flush=True)
-
+    plt.
     logger.info(f'{_t} ' + f'{pr}')

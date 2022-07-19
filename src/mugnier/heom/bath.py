@@ -4,12 +4,7 @@
 Decomposition of the bath and BE distribution
 """
 from __future__ import annotations
-from math import gamma
-
 from typing import Callable, Literal, Optional
-
-from matplotlib.pyplot import cla
-
 from mugnier.libs.backend import PI, Array, array, np
 
 
@@ -104,7 +99,8 @@ class BoseEinstein(object):
 
 class Correlation(object):
 
-    def __init__(self, spectral_densities: list[SpectralDensity], distribution: BoseEinstein) -> None:
+    def __init__(self, spectral_densities: list[SpectralDensity],
+                 distribution: BoseEinstein) -> None:
         self.spectral_densities = spectral_densities
         self.distribution = distribution
 
@@ -119,6 +115,14 @@ class Correlation(object):
             self.derivatives.extend(ds)
         self.get_ltc()
         return
+
+    def __add__(self, other: Correlation) -> Correlation:
+        new_obj = object.__new__(type(self))
+        new_obj.coefficients = self.coefficients + other.coefficients
+        new_obj.conj_coefficents = self.conj_coefficents + other.conj_coefficents
+        new_obj.derivatives = self.derivatives + other.derivatives
+
+        return new_obj
 
     def fix(self, roundoff) -> None:
         """Fix underflow in the coefficients."""
@@ -190,23 +194,17 @@ class Drude(SpectralDensity):
         return coefficients, conj_coefficents, derivatives
 
 
-class DiscreteVibration(SpectralDensity):
+class DiscreteVibration(Correlation):
 
     def __init__(self, frequency: float, coupling: float, beta: Optional[float]) -> None:
-        self.w0 = frequency
-        self.g = coupling
-        self.beta = beta
-        return
+        w0 = frequency
+        g = coupling
 
-    def get_htc(self, distr: BoseEinstein) -> tuple[list[complex], list[complex], list[complex]]:
-        w0 = self.w0
-        g = self.g
-        beta = distr.beta
         coth = 1.0 / np.tanh(beta * w0 / 2.0) if beta is not None else 1.0
-        coefficients = [g**2 / 2.0 * (coth + 1.0), g**2 / 2.0 * (coth - 1.0)]
-        conj_coefficents = [g**2 / 2.0 * (coth - 1.0), g**2 / 2.0 * (coth + 1.0)]
-        derivatives = [-1.0j * w0, +1.0j * w0]
-        return coefficients, conj_coefficents, derivatives
+        self.coefficients = [g**2 / 2.0 * (coth + 1.0), g**2 / 2.0 * (coth - 1.0)]
+        self.conj_coefficents = [g**2 / 2.0 * (coth - 1.0), g**2 / 2.0 * (coth + 1.0)]
+        self.derivatives = [-1.0j * w0, +1.0j * w0]
+        return  
 
 
 class UnderdampedBrownian(SpectralDensity):

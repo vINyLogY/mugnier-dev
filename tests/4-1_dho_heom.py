@@ -19,97 +19,16 @@ from mugnier.libs.quantity import Quantity as __
 from mugnier.operator.spo import Propagator
 from mugnier.basis import dvr
 
-LIMITER = 10000
-
-
-def ho(omega, center):
-    return lambda x: 0.5 * omega**2 * (x - center)**2
-
-
-def softmax(b):
-
-    def func(x):
-        return np.cos(np.pi * 0.5 * (erf(b * x) + 1))
-
-    return func
-
-
-def mid(b):
-
-    def func(x):
-        return np.sin(np.pi * 0.5 * (erf(b * x) + 1))
-
-    return func
-
-
-def left_morse(depth=1, frequency=1, center=-10):
-    alpha = np.sqrt(frequency / 2.0 * depth)
-
-    def func(x):
-        return np.minimum(depth * (1.0 - np.exp(-alpha * (x - center)))**2,
-                          LIMITER)
-
-    return func
-
-
-def right_morse(depth=1, frequency=1, center=10):
-    alpha = np.sqrt(frequency / 2.0 * depth)
-
-    def func(x):
-        return np.minimum(depth * (1.0 - np.exp(alpha * (x - center)))**2,
-                          LIMITER)
-
-    return func
-
-
-def gaussian(height=10, sigma=1, center=0, init_momentum=None):
-
-    def func(x):
-        if init_momentum is None:
-            return height * np.exp(-(x - center)**2 / (2.0 * sigma**2))
-        else:
-            return height * np.exp(-(x - center)**2 /
-                                   (2.0 * sigma**2)) * np.exp(
-                                       1.0j * x * init_momentum)
-
-    return func
-
-
-dvr_space = (-30, 30)
-dvr_dim = 300
-basis = dvr.SineDVR(dvr_space[0], dvr_space[1], dvr_dim)
-
-grids = basis.grid_points
-pes_freq = 1
-# center0 = -2.5
-# center1 = 2.5
-# depth = 3
-# height = 2
-# coupling_width = 1
-loc = -3
-
-# e0_func = left_morse(depth, pes_freq, center0)
-# e1_func = right_morse(depth, pes_freq, center1)
-# v_func = gaussian(height, coupling_width, 0)
-e0_func = lambda x: -softmax(3)(x)
-e1_func = softmax(3)
-v_func = mid(3)
-init_func = gaussian(1.0, 1.0 / np.sqrt(pes_freq), loc, init_momentum=30)
-init_nuc = init_func(grids)
-init_nuc /= np.linalg.norm(init_nuc)
-
 
 def run_dho(
     # System
     ## Elec
     init_wfn: Array,
     ## Nuc
-    dvr_space: tuple[float, float],
-    dvr_dim: int,
-    e0_func: Callable,
-    e1_func: Callable,
-    v_func: Callable,
-    init_func: Callable,
+    nuc_dim: int,
+    freq: float,
+    sys_coupling: float,
+    sb_coupling: float,
     # Drudian bath
     include_drude: bool,
     re_d: Optional[float],
@@ -142,30 +61,33 @@ def run_dho(
     backend.parameters.svd_atol = svd_atol
 
     # System settings:
-    proj_0 = backend.array([[1.0, 0.0], [0.0, 0.0]])
-    proj_1 = backend.array([[0.0, 0.0], [0.0, 1.0]])
-    sigma_z = backend.array([[-0.5, 0.0], [0.0, 0.5]])
-    sigma_x = backend.array([[0.0, 1.0], [1.0, 0.0]])
+    sigma_z = np.array([[-0.5, 0.0], [0.0, 0.5]])
+    sigma_x = np.array([[0.0, 1.0], [1.0, 0.0]])
+    sys_id = np.identity(2)
+
+    def direct_mat_product(elec, nuc):
+        return np.tensordot(elec, nuc,
+                            axes=0).swapaxes(1,
+                                             2).reshape(2 * nuc_dim,
+                                                        2 * nuc_dim)
+
+    def direct_vec_product(elec, nuc):
+        return np.tensordot(elec, nuc, axes=0).reshape(-1)
 
     # Elec-Nuc
-    basis = dvr.SineDVR(dvr_space[0], dvr_space[1], dvr_dim)
-    kinetic = np.tensordot(np.identity(2), basis.t_mat,
-                           axes=0).swapaxes(1,
-                                            2).reshape(2 * dvr_dim, 2 * dvr_dim)
-    e0 = np.tensordot(proj_0, np.diag(e0_func(basis.grid_points)),
-                      axes=0).swapaxes(1, 2).reshape(2 * dvr_dim, 2 * dvr_dim)
-    e1 = np.tensordot(proj_1, np.diag(e1_func(basis.grid_points)),
-                      axes=0).swapaxes(1, 2).reshape(2 * dvr_dim, 2 * dvr_dim)
-    v = np.tensordot(sigma_x, np.diag(v_func(basis.grid_points)),
-                     axes=0).swapaxes(1, 2).reshape(2 * dvr_dim, 2 * dvr_dim)
+    x = np.diag(np.arange(1, nuc_dim), k=-1) + np.diag(np.arange(1, nuc_dim),
+                                                       k=1)
 
-    wfn = np.tensordot(init_wfn, init_func(basis.grid_points),
-                       axes=0).reshape(-1)
-    wfn /= np.linalg.norm(wfn)
+    h1 = direct_mat_product(sigma_z, np.identity(nuc_dim))
+    h2 = direct_mat_product(sys_coupling * sigma_x, np.identity(nuc_dim))
+    h3 = direct_mat_product(sigma_z, sb_coupling * x)
+    h4 = direct_mat_product(sys_id, freq * np.diag(np.arange(nuc_dim)))
+    nuc_wfn = np.zeros((nuc_dim,), dtype=float)
+    nuc_wfn[0] = 1.0
+    wfn = direct_vec_product(init_wfn, nuc_wfn)
     init_rdo = np.outer(np.conj(wfn), wfn)
-    h = kinetic + e0 + e1 + v
-    op = np.tensordot(sigma_z, np.identity(dvr_dim),
-                      axes=0).swapaxes(1, 2).reshape(2 * dvr_dim, 2 * dvr_dim)
+    h = h1 + h2 + h3
+    op = direct_mat_product(sigma_z, np.identity(nuc_dim))
 
     # Bath settings:
     distr = BoseEinstein(n=n_ltc, beta=1 / temperature)
@@ -203,7 +125,9 @@ def run_dho(
             trace = torch.trace(rdo)
             s.opt_update(s.root, s[s.root] / trace)
             rdo = s.get_rdo()
-            yield _t, rdo
+            rdo_s = torch.einsum('ikjk->ij',
+                                 rdo.reshape(2, nuc_dim, 2, nuc_dim))
+            yield _t, rdo_s
 
     return
 
@@ -213,12 +137,10 @@ it = run_dho(
     ## Elec
     init_wfn=[1, 0],
     ## Nuc
-    dvr_space=dvr_space,
-    dvr_dim=dvr_dim,
-    e0_func=e0_func,
-    e1_func=e1_func,
-    v_func=v_func,
-    init_func=init_func,
+    nuc_dim=50,
+    freq=0.3,
+    sys_coupling=0.2,
+    sb_coupling=0.1,
     # Drudian bath
     include_drude=True,
     # include_drude=False,
@@ -242,14 +164,14 @@ it = run_dho(
     ode_atol=1.e-7,
     svd_atol=1.e-7,
     # Propagator
-    dt=0.01,
-    end=100,
+    dt=0.1,
+    end=300,
     callback_steps=1,
 )
 
-logger = Logger(filename='3_dvr_heom.log', level='info').logger
+logger = Logger(filename='4_dho_mix_heom.log', level='info').logger
 for _t, rho in it:
     pr = torch.trace(rho @ rho).cpu().numpy()
     print(_t, (pr), flush=True)
 
-    logger.info(f'{_t} ' + f'{pr}')
+    logger.info(f'{_t} {rho[0, 0]} {rho[0, 1]} {rho[1, 0]} {rho[1, 1]}')
