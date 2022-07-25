@@ -123,7 +123,7 @@ def run_spin_boson(
                           dims,
                           rank=rank,
                           decimation_rate=decimation_rate,
-                          rev=False,
+                          rev=True,
                           spaces=spaces)
     elif htd_method == 'Tree2':
         s = TreeHierachy(init_rdo,

@@ -10,7 +10,7 @@ import numpy as np
 import torch
 from scipy.special import erf
 
-from mugnier.heom.bath import BoseEinstein, Correlation, DiscreteVibration, Drude, SpectralDensity, UnderdampedBrownian
+from mugnier.heom.bath import BoseEinstein, Correlation, Drude, SpectralDensity, UnderdampedBrownian
 from mugnier.heom.hierachy import HeomOp, NaiveHierachy, TrainHierachy, TreeHierachy
 from mugnier.libs import backend
 from mugnier.libs.backend import Array, OptArray
@@ -40,6 +40,7 @@ def run_dho(
     # Tensor Hierachy Tucker Decompositon
     dim: int,
     htd_method: str,
+    rank: int,
     # HEOM type
     heom_factor: float,
     ode_method: str,
@@ -63,11 +64,31 @@ def run_dho(
     # System settings:
     sigma_z = np.array([[-0.5, 0.0], [0.0, 0.5]])
     sigma_x = np.array([[0.0, 1.0], [1.0, 0.0]])
+    sys_id = np.identity(2)
+
+    def direct_mat_product(elec, nuc):
+        return np.tensordot(elec, nuc,
+                            axes=0).swapaxes(1,
+                                             2).reshape(2 * nuc_dim,
+                                                        2 * nuc_dim)
+
+    def direct_vec_product(elec, nuc):
+        return np.tensordot(elec, nuc, axes=0).reshape(-1)
 
     # Elec-Nuc
-    init_rdo = np.outer(np.conj(init_wfn), init_wfn)
-    h = sigma_z + sys_coupling * sigma_x
-    op = sigma_z
+    x = np.diag(np.arange(1, nuc_dim), k=-1) + np.diag(np.arange(1, nuc_dim),
+                                                       k=1)
+
+    h1 = direct_mat_product(sigma_z, np.identity(nuc_dim))
+    h2 = direct_mat_product(sys_coupling * sigma_x, np.identity(nuc_dim))
+    h3 = direct_mat_product(sigma_z, sb_coupling * x)
+    h4 = direct_mat_product(sys_id, freq * np.diag(np.arange(nuc_dim)))
+    nuc_wfn = np.zeros((nuc_dim,), dtype=float)
+    nuc_wfn[0] = 1.0
+    wfn = direct_vec_product(init_wfn, nuc_wfn)
+    init_rdo = np.outer(np.conj(wfn), wfn)
+    h = h1 + h2 + h3 + h4
+    op = direct_mat_product(sigma_z, np.identity(nuc_dim))
 
     # Bath settings:
     distr = BoseEinstein(n=n_ltc, beta=1 / temperature)
@@ -76,16 +97,21 @@ def run_dho(
     if include_drude:
         drude = Drude(re_d, width_d)
         sds.append(drude)
-    corr1 = Correlation(sds, distr)
-    corr1.fix(roundoff=roundoff)
-
-    corr2 = DiscreteVibration(freq, sb_coupling, beta=None)
-    corr = corr1 + corr2
+    corr = Correlation(sds, distr)
+    corr.fix(roundoff=roundoff)
     print(corr)
 
     # HEOM settings:
-    dims = [dim] * corr1.k_max + [nuc_dim] * corr2.k_max
-    if htd_method == 'Naive':
+    dims = [dim] * corr.k_max
+    if htd_method == 'Train':
+        s = TrainHierachy(init_rdo, dims, rank=rank)
+    elif htd_method == 'RevTrain':
+        s = TrainHierachy(init_rdo, dims, rank=rank, rev=True)
+    elif htd_method == 'Tree2':
+        s = TreeHierachy(init_rdo, dims, n_ary=2, rank=rank)
+    elif htd_method == 'Tree3':
+        s = TreeHierachy(init_rdo, dims, n_ary=3, rank=rank)
+    elif htd_method == 'Naive':
         s = NaiveHierachy(init_rdo, dims)
     else:
         raise NotImplementedError(f'No htd_method {htd_method}.')
@@ -108,7 +134,9 @@ def run_dho(
             trace = torch.trace(rdo)
             s.opt_update(s.root, s[s.root] / trace)
             rdo = s.get_rdo()
-            yield _t, rdo
+            rdo_s = torch.einsum('ikjk->ij',
+                                 rdo.reshape(2, nuc_dim, 2, nuc_dim))
+            yield _t, rdo_s
 
     return
 
@@ -119,7 +147,7 @@ it = run_dho(
     init_wfn=[1, 0],
     ## Nuc
     nuc_dim=50,
-    freq=0.5,
+    freq=0.3,
     sys_coupling=0.2,
     sb_coupling=0.1,
     # Drudian bath
@@ -132,12 +160,13 @@ it = run_dho(
     decomposition_method='Pade',
     n_ltc=1,
     # Tensor Hierachy Tucker Decompositon
-    dim=5,
-    htd_method='Naive',
+    dim=10,
+    htd_method='Tree2',
+    rank=5,
     # HEOM type
     heom_factor=1.0,
-    ode_method='dopri5',
-    ps_method='vmf',
+    ode_method='rk4',
+    ps_method='ps2',
     reg_method='proper',
     # Error
     roundoff=1.e-8,
@@ -147,10 +176,10 @@ it = run_dho(
     # Propagator
     dt=0.1,
     end=300,
-    callback_steps=1,
+    callback_steps=100,
 )
 
-logger = Logger(filename='4_dho_pure_heom.log', level='info').logger
+logger = Logger(filename='5_dho_tucker_heom.log', level='info').logger
 for _t, rho in it:
     pr = torch.trace(rho @ rho).cpu().numpy()
     print(_t, (pr), flush=True)

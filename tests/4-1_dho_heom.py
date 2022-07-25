@@ -86,7 +86,7 @@ def run_dho(
     nuc_wfn[0] = 1.0
     wfn = direct_vec_product(init_wfn, nuc_wfn)
     init_rdo = np.outer(np.conj(wfn), wfn)
-    h = h1 + h2 + h3
+    h = h1 + h2 + h3 + h4
     op = direct_mat_product(sigma_z, np.identity(nuc_dim))
 
     # Bath settings:
@@ -169,7 +169,7 @@ it = run_dho(
     callback_steps=1,
 )
 
-logger = Logger(filename='4_dho_mix_heom.log', level='info').logger
+logger = Logger(filename='4_dho_mix2_heom.log', level='info').logger
 for _t, rho in it:
     pr = torch.trace(rho @ rho).cpu().numpy()
     print(_t, (pr), flush=True)
